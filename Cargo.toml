@@ -1,8 +1,29 @@
 [package]
-name = "spark-matcher-rs"
+name = "spark-matcher"
+description = "A Rust version of the spark-matcher project."
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+authors = ["Oleksii Kshenskyi <oleksii.kshenskyi@uatechpeople.com>"]
+license = "Apache-2.0"
 
 [dependencies]
+fuels = { version = "0.55.0", features = ["fuel-core-lib"] }
+rand = "0.8.5"
+tokio = { version = "1.12", features = ["rt", "macros"] }
+src20_sdk = { git = "https://github.com/compolabs/src-20.git", branch = "master" }
+dotenv = "0.15.0"
+hex = "0.4"
+
+[[test]]
+harness = true
+name = "integration_tests"
+path = "tests/harness.rs"
+
+
+[lib]
+name = "orderbook"
+path = "src/lib.rs"
+
+[[bin]]
+name = "spark-matcher"
+path = "src/main.rs"
