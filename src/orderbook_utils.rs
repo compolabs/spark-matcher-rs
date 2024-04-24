@@ -14,9 +14,15 @@ use rand::Rng;
 
 use self::abigen_bindings::orderbook_contract_mod;
 
+#[cfg(debug_assertions)]
 abigen!(Contract(
     name = "OrderbookContract",
     abi = "contract/out/debug/orderbook-abi.json"
+));
+#[cfg(not(debug_assertions))]
+abigen!(Contract(
+    name = "OrderbookContract",
+    abi = "contract/out/release/orderbook-abi.json"
 ));
 
 pub struct Orderbook {
