@@ -1,21 +1,31 @@
 use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::routing::get;
-use fuels::accounts::wallet::WalletUnlocked;
-use fuels::crypto::SecretKey;
-use orderbook::constants::*;
-use orderbook::print_title;
+use orderbook::{
+    constants::{ORDERBOOK_CONTRACT_ID, RPC, TOKEN_CONTRACT_ID},
+    orderbook_utils::Orderbook,
+    print_title,
+};
 use tokio::sync::Mutex;
 
 use anyhow::Result;
 use std::collections::HashMap;
-use std::error::Error;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use fuels::{
+    crypto::SecretKey,
+    prelude::{Provider, WalletUnlocked},
+    types::ContractId,
+};
+use src20_sdk::token_utils::{Asset, TokenContract};
+
 use dotenv::dotenv;
-use fuels::accounts::provider::Provider;
+
+const MARKET_SYMBOL: &str = "BTC";
+const BASE_SIZE: f64 = 0.01;
+const BASE_PRICE: f64 = 65500.;
 
 #[derive(Eq, PartialEq)]
 pub enum Status {
@@ -23,8 +33,13 @@ pub enum Status {
     Active,
 }
 
+pub fn ev(key: &str) -> Result<String> {
+    Ok(std::env::var(key)?)
+}
+
 pub struct SparkMatcher {
     wallet: WalletUnlocked,
+    token_contract: TokenContract<WalletUnlocked>,
     initialized: bool,
     status: Status,
     fails: HashMap<String, i64>,
@@ -33,7 +48,7 @@ pub struct SparkMatcher {
 impl SparkMatcher {
     pub async fn new() -> Result<Self> {
         let provider = Provider::connect(RPC).await?;
-        let private_key = std::env::var("PRIVATE_KEY")?;
+        let private_key = ev("PRIVATE_KEY")?;
         let wallet = WalletUnlocked::new_from_private_key(
             SecretKey::from_str(&private_key)?,
             Some(provider.clone()),
@@ -41,6 +56,10 @@ impl SparkMatcher {
 
         Ok(Self {
             wallet: wallet.clone(),
+            token_contract: TokenContract::new(
+                &ContractId::from_str(TOKEN_CONTRACT_ID).unwrap().into(),
+                wallet.clone(),
+            ),
             initialized: true,
             status: Status::Chill,
             fails: HashMap::new(),
@@ -74,7 +93,7 @@ impl SparkMatcher {
         match self.do_match().await {
             Ok(_) => (),
             Err(e) => {
-                println!("An error occurred: `{}`", e);
+                println!("An error occurred while matching: `{}`", e);
                 tokio::time::sleep(Duration::from_millis(5000)).await;
             }
         }
@@ -84,6 +103,61 @@ impl SparkMatcher {
     }
 
     async fn do_match(&self) -> Result<()> {
+        let token_contract_id = self.token_contract.contract_id().into();
+        let base_asset = Asset::new(self.wallet.clone(), token_contract_id, MARKET_SYMBOL);
+        let quote_asset = Asset::new(self.wallet.clone(), token_contract_id, "USDC");
+
+        let orderbook = Orderbook::new(&self.wallet, ORDERBOOK_CONTRACT_ID).await;
+        let price = (BASE_PRICE * 10f64.powf(orderbook.price_decimals as f64)) as u64;
+
+        let base_size = base_asset.parse_units(BASE_SIZE as f64) as u64;
+        base_asset
+            .mint(self.wallet.address().into(), base_size)
+            .await
+            .unwrap();
+
+        let sell_order_id = orderbook
+            .open_order(base_asset.asset_id, -1 * base_size as i64, price - 1)
+            .await
+            .unwrap()
+            .value;
+
+        let quote_size = quote_asset.parse_units(BASE_SIZE as f64 * BASE_PRICE as f64);
+        quote_asset
+            .mint(self.wallet.address().into(), quote_size as u64)
+            .await
+            .unwrap();
+
+        let buy_order_id = orderbook
+            .open_order(base_asset.asset_id, base_size as i64, price)
+            .await
+            .unwrap()
+            .value;
+
+        println!(
+            "buy_order = {:?}\n",
+            orderbook
+                .order_by_id(&buy_order_id)
+                .await
+                .unwrap()
+                .value
+                .unwrap()
+        );
+        println!(
+            "sell_order = {:?}",
+            orderbook
+                .order_by_id(&sell_order_id)
+                .await
+                .unwrap()
+                .value
+                .unwrap()
+        );
+
+        orderbook
+            .match_orders(&sell_order_id, &buy_order_id)
+            .await
+            .unwrap();
+
         Ok(())
     }
 }
