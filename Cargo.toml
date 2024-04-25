@@ -15,6 +15,7 @@ spark_sdk = { git = "https://github.com/compolabs/spark-rs.git", branch = "maste
 dotenv = "0.15.0"
 hex = "0.4"
 axum = {version = "0.7.5" }
+anyhow = "1.0.82"
 
 [lib]
 name = "orderbook"
