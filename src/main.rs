@@ -54,10 +54,13 @@ pub struct IndexerOrder {
     pub order_id: String,
     pub trader: String,
     pub base_token: String,
-    pub base_size: i128,
-    pub base_price: u128,
+    pub base_size: String,
+    pub base_price: String,
     pub timestamp: String,
+
+    #[serde(rename = "createdAt")]
     pub created_at: String,
+    #[serde(rename = "updatedAt")]
     pub updated_at: String,
 }
 
@@ -118,7 +121,7 @@ impl SparkMatcher {
         self.status = Status::Active;
 
         match self.do_match().await {
-            Ok(_) => (),
+            Ok(_) => tokio::time::sleep(Duration::from_millis(1000)).await,
             Err(e) => {
                 println!("An error occurred while matching: `{}`", e);
                 tokio::time::sleep(Duration::from_millis(5000)).await;
@@ -166,12 +169,22 @@ impl SparkMatcher {
     }
 
     async fn do_match(&mut self) -> Result<()> {
+        println!("before indexing");
         let (mut sell_orders, mut buy_orders) = (
             Self::fetch_orders_from_indexer(OrderType::Sell).await?,
             Self::fetch_orders_from_indexer(OrderType::Buy).await?,
         );
+        println!(
+            "====after indexing===\nsells: `{:?}`;\nbuys: `{:?}`;=====end======\n",
+            &sell_orders, &buy_orders
+        );
         for sell_order in &mut sell_orders {
-            if sell_order.base_size == 0 {
+            println!("sell loop start");
+            let (sell_size, sell_price) = (
+                sell_order.base_size.parse::<i128>()?,
+                sell_order.base_price.parse::<i128>()?,
+            );
+            if sell_size == 0 {
                 continue;
             }
             if *self.fails.get(&sell_order.order_id).unwrap_or(&0) > 5 {
@@ -179,18 +192,25 @@ impl SparkMatcher {
             }
 
             for buy_order in &mut buy_orders {
-                if buy_order.base_size == 0 {
+                println!("buy loop start");
+                let (buy_size, buy_price) = (
+                    buy_order.base_size.parse::<i128>()?,
+                    buy_order.base_price.parse::<i128>()?,
+                );
+                if buy_size == 0 {
                     continue;
                 }
                 if *self.fails.get(&buy_order.order_id).unwrap_or(&0) > 5 {
                     continue;
                 }
 
-                if sell_order.base_price <= buy_order.base_price
-                    && sell_order.base_price > 0
-                    && buy_order.base_price > 0
+                println!("before match condition checking");
+                if sell_price <= buy_price
+                    && sell_price > 0
+                    && buy_price > 0
                     && sell_order.base_token == buy_order.base_token
                 {
+                    println!("inside match condition checking");
                     let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
                     let buy_id = Bits256::from_hex_str(&buy_order.order_id)?;
 
@@ -199,7 +219,8 @@ impl SparkMatcher {
                             "✅ Orders matched: sell => `{}`, buy => `{}`!\n",
                             &sell_order.order_id, &buy_order.order_id
                         ),
-                        Err(_) => {
+                        Err(e) => {
+                            println!("matching error `{}`", e);
                             let sell_fail =
                                 self.fails.entry(sell_order.order_id.clone()).or_insert(0);
                             *sell_fail += 1;
@@ -213,6 +234,7 @@ impl SparkMatcher {
             }
         }
 
+        println!("matching returned with Ok");
         Ok(())
     }
 }
