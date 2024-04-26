@@ -12,6 +12,7 @@ rand = "0.8.5"
 tokio = { version = "1.12", features = ["rt", "macros"] }
 src20_sdk = { git = "https://github.com/compolabs/src-20.git", branch = "master" }
 spark_sdk = { git = "https://github.com/compolabs/spark-rs.git", branch = "master" }
+orderbook = { git = "https://github.com/compolabs/orderbook-contract.git", branch = "master" }
 dotenv = "0.15.0"
 hex = "0.4"
 axum = {version = "0.7.5" }
@@ -19,10 +20,6 @@ anyhow = "1.0.82"
 reqwest = { version = "0.12.4", features = ["json"] }
 serde_json = "1.0.116"
 serde = { version = "1.0.198", features = ["derive"] }
-
-[lib]
-name = "orderbook"
-path = "src/lib.rs"
 
 [[bin]]
 name = "spark-matcher"

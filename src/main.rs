@@ -179,7 +179,7 @@ impl SparkMatcher {
         for sell_order in &mut sell_orders {
             println!("sell loop start");
             let (sell_size, sell_price) = (
-                sell_order.base_size.parse::<i128>()?.abs(),
+                sell_order.base_size.parse::<i128>()?,
                 sell_order.base_price.parse::<i128>()?,
             );
             if sell_size == 0 {
@@ -192,7 +192,7 @@ impl SparkMatcher {
             for buy_order in &mut buy_orders {
                 println!("buy loop start");
                 let (buy_size, buy_price) = (
-                    buy_order.base_size.parse::<i128>()?.abs(),
+                    buy_order.base_size.parse::<i128>()?,
                     buy_order.base_price.parse::<i128>()?,
                 );
                 if buy_size == 0 {
@@ -204,8 +204,8 @@ impl SparkMatcher {
 
                 println!("before match condition checking");
                 if sell_price <= buy_price
-                    && sell_price > 0
-                    && buy_price > 0
+                    && sell_size < 0
+                    && buy_size > 0
                     && sell_order.base_token == buy_order.base_token
                 {
                     println!("inside match condition checking");
