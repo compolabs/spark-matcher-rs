@@ -1,3 +1,4 @@
+use anyhow::Result;
 use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::routing::get;
@@ -6,18 +7,22 @@ use orderbook::{
     orderbook_utils::Orderbook,
     print_title,
 };
+use reqwest::Client;
+use serde::Deserialize;
+use serde_json;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 
-use anyhow::Result;
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{cmp::Ordering, collections::HashMap};
 
 use fuels::{
     crypto::SecretKey,
     prelude::{Provider, WalletUnlocked},
-    types::ContractId,
+    types::{Bits256, ContractId},
 };
 use src20_sdk::token_utils::{Asset, TokenContract};
 
@@ -33,13 +38,33 @@ pub enum Status {
     Active,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum OrderType {
+    Buy,
+    Sell,
+}
+
 pub fn ev(key: &str) -> Result<String> {
     Ok(std::env::var(key)?)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IndexerOrder {
+    pub id: usize,
+    pub order_id: String,
+    pub trader: String,
+    pub base_token: String,
+    pub base_size: i128,
+    pub base_price: u128,
+    pub timestamp: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 pub struct SparkMatcher {
     wallet: WalletUnlocked,
     token_contract: TokenContract<WalletUnlocked>,
+    orderbook: Orderbook,
     initialized: bool,
     status: Status,
     fails: HashMap<String, i64>,
@@ -49,6 +74,7 @@ impl SparkMatcher {
     pub async fn new() -> Result<Self> {
         let provider = Provider::connect(RPC).await?;
         let private_key = ev("PRIVATE_KEY")?;
+        let contract_id = ev("CONTRACT_ID")?;
         let wallet = WalletUnlocked::new_from_private_key(
             SecretKey::from_str(&private_key)?,
             Some(provider.clone()),
@@ -60,6 +86,7 @@ impl SparkMatcher {
                 &ContractId::from_str(TOKEN_CONTRACT_ID).unwrap().into(),
                 wallet.clone(),
             ),
+            orderbook: Orderbook::new(&wallet, &contract_id).await,
             initialized: true,
             status: Status::Chill,
             fails: HashMap::new(),
@@ -102,61 +129,89 @@ impl SparkMatcher {
         Box::pin(self.process_next()).await;
     }
 
-    async fn do_match(&self) -> Result<()> {
-        let token_contract_id = self.token_contract.contract_id().into();
-        let base_asset = Asset::new(self.wallet.clone(), token_contract_id, MARKET_SYMBOL);
-        let quote_asset = Asset::new(self.wallet.clone(), token_contract_id, "USDC");
-
-        let orderbook = Orderbook::new(&self.wallet, ORDERBOOK_CONTRACT_ID).await;
-        let price = (BASE_PRICE * 10f64.powf(orderbook.price_decimals as f64)) as u64;
-
-        let base_size = base_asset.parse_units(BASE_SIZE as f64) as u64;
-        base_asset
-            .mint(self.wallet.address().into(), base_size)
-            .await
-            .unwrap();
-
-        let sell_order_id = orderbook
-            .open_order(base_asset.asset_id, -1 * base_size as i64, price - 1)
-            .await
-            .unwrap()
-            .value;
-
-        let quote_size = quote_asset.parse_units(BASE_SIZE as f64 * BASE_PRICE as f64);
-        quote_asset
-            .mint(self.wallet.address().into(), quote_size as u64)
-            .await
-            .unwrap();
-
-        let buy_order_id = orderbook
-            .open_order(base_asset.asset_id, base_size as i64, price)
-            .await
-            .unwrap()
-            .value;
-
-        println!(
-            "buy_order = {:?}\n",
-            orderbook
-                .order_by_id(&buy_order_id)
-                .await
-                .unwrap()
-                .value
-                .unwrap()
+    fn format_indexer_url(order_type: OrderType) -> String {
+        let order_type_str = format!(
+            "&orderType={}",
+            if order_type == OrderType::Sell {
+                "sell"
+            } else {
+                "buy"
+            }
         );
-        println!(
-            "sell_order = {:?}",
-            orderbook
-                .order_by_id(&sell_order_id)
-                .await
-                .unwrap()
-                .value
-                .unwrap()
-        );
+        format!(
+            "{}{}",
+            ev("INDEXER_URL_NO_ORDER_TYPE").unwrap_or("<ERROR>".to_owned()),
+            order_type_str
+        )
+    }
 
-        orderbook
-            .match_orders(&sell_order_id, &buy_order_id)
-            .await
-            .unwrap();
+    pub async fn fetch_orders_from_indexer(order_type: OrderType) -> Result<Vec<IndexerOrder>> {
+        let indexer_url = Self::format_indexer_url(order_type);
+
+        let sort_func: for<'a, 'b> fn(&'a IndexerOrder, &'b IndexerOrder) -> Ordering =
+            match order_type {
+                OrderType::Buy => |a, b| b.base_price.cmp(&a.base_price),
+                OrderType::Sell => |a, b| a.base_price.cmp(&b.base_price),
+            };
+
+        let mut orders_deserialized = Client::new()
+            .get(indexer_url)
+            .send()
+            .await?
+            .json::<Vec<IndexerOrder>>()
+            .await?;
+        orders_deserialized.sort_by(sort_func);
+
+        Ok(orders_deserialized)
+    }
+
+    async fn do_match(&mut self) -> Result<()> {
+        let (mut sell_orders, mut buy_orders) = (
+            Self::fetch_orders_from_indexer(OrderType::Sell).await?,
+            Self::fetch_orders_from_indexer(OrderType::Buy).await?,
+        );
+        for sell_order in &mut sell_orders {
+            if sell_order.base_size == 0 {
+                continue;
+            }
+            if *self.fails.get(&sell_order.order_id).unwrap_or(&0) > 5 {
+                continue;
+            }
+
+            for buy_order in &mut buy_orders {
+                if buy_order.base_size == 0 {
+                    continue;
+                }
+                if *self.fails.get(&buy_order.order_id).unwrap_or(&0) > 5 {
+                    continue;
+                }
+
+                if sell_order.base_price <= buy_order.base_price
+                    && sell_order.base_price > 0
+                    && buy_order.base_price > 0
+                    && sell_order.base_token == buy_order.base_token
+                {
+                    let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
+                    let buy_id = Bits256::from_hex_str(&buy_order.order_id)?;
+
+                    match self.orderbook.match_orders(&sell_id, &buy_id).await {
+                        Ok(_) => println!(
+                            "✅ Orders matched: sell => `{}`, buy => `{}`!\n",
+                            &sell_order.order_id, &buy_order.order_id
+                        ),
+                        Err(_) => {
+                            let sell_fail =
+                                self.fails.entry(sell_order.order_id.clone()).or_insert(0);
+                            *sell_fail += 1;
+
+                            let buy_fail =
+                                self.fails.entry(buy_order.order_id.clone()).or_insert(0);
+                            *buy_fail += 1;
+                        }
+                    };
+                }
+            }
+        }
 
         Ok(())
     }
