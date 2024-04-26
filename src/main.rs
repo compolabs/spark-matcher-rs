@@ -134,10 +134,9 @@ impl SparkMatcher {
     fn format_indexer_url(order_type: OrderType) -> String {
         let order_type_str = format!(
             "&orderType={}",
-            if order_type == OrderType::Sell {
-                "sell"
-            } else {
-                "buy"
+            match order_type {
+                OrderType::Sell => "sell",
+                OrderType::Buy => "buy",
             }
         );
         format!(
@@ -174,13 +173,13 @@ impl SparkMatcher {
             Self::fetch_orders_from_indexer(OrderType::Buy).await?,
         );
         println!(
-            "====after indexing===\nsells: `{:?}`;\nbuys: `{:?}`;=====end======\n",
+            "====after indexing===\nsells: `{:?}`;\nbuys: `{:?}`;\n=====end======\n",
             &sell_orders, &buy_orders
         );
         for sell_order in &mut sell_orders {
             println!("sell loop start");
             let (sell_size, sell_price) = (
-                sell_order.base_size.parse::<i128>()?,
+                sell_order.base_size.parse::<i128>()?.abs(),
                 sell_order.base_price.parse::<i128>()?,
             );
             if sell_size == 0 {
@@ -193,7 +192,7 @@ impl SparkMatcher {
             for buy_order in &mut buy_orders {
                 println!("buy loop start");
                 let (buy_size, buy_price) = (
-                    buy_order.base_size.parse::<i128>()?,
+                    buy_order.base_size.parse::<i128>()?.abs(),
                     buy_order.base_price.parse::<i128>()?,
                 );
                 if buy_size == 0 {
