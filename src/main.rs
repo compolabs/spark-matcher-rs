@@ -105,31 +105,30 @@ impl SparkMatcher {
     }
 
     async fn process_next(&mut self) {
-        if !self.initialized {
-            tokio::time::sleep(Duration::from_millis(1000)).await;
+        loop {
+            if !self.initialized {
+                tokio::time::sleep(Duration::from_millis(1000)).await;
 
-            Box::pin(self.process_next()).await;
-            return;
-        }
-
-        if self.status == Status::Active {
-            tokio::time::sleep(Duration::from_millis(1000)).await;
-
-            Box::pin(self.process_next()).await;
-            return;
-        }
-        self.status = Status::Active;
-
-        match self.do_match().await {
-            Ok(_) => tokio::time::sleep(Duration::from_millis(1000)).await,
-            Err(e) => {
-                println!("An error occurred while matching: `{}`", e);
-                tokio::time::sleep(Duration::from_millis(5000)).await;
+                continue;
             }
-        }
 
-        self.status = Status::Chill;
-        Box::pin(self.process_next()).await;
+            if self.status == Status::Active {
+                tokio::time::sleep(Duration::from_millis(1000)).await;
+
+                continue;
+            }
+            self.status = Status::Active;
+
+            match self.do_match().await {
+                Ok(_) => tokio::time::sleep(Duration::from_millis(1000)).await,
+                Err(e) => {
+                    println!("An error occurred while matching: `{}`", e);
+                    tokio::time::sleep(Duration::from_millis(5000)).await;
+                }
+            }
+
+            self.status = Status::Chill;
+        }
     }
 
     fn format_indexer_url(order_type: OrderType) -> String {
