@@ -1,3 +1,4 @@
 target/
 *.lock
 .env
+buysell.txt

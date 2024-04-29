@@ -189,14 +189,22 @@ impl SparkMatcher {
                     continue;
                 }
 
+                let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
+                let buy_id = Bits256::from_hex_str(&buy_order.order_id)?;
+                if self.orderbook.order_by_id(&sell_id).await?.value.is_none() {
+                    println!("👽 Phantom order sell: `{}`.", &sell_order.order_id);
+                    continue;
+                }
+                if self.orderbook.order_by_id(&buy_id).await?.value.is_none() {
+                    println!("👽 Phantom order buy: `{}`.", &buy_order.order_id);
+                    continue;
+                }
+
                 if sell_price <= buy_price
                     && sell_size < 0
                     && buy_size > 0
                     && sell_order.base_token == buy_order.base_token
                 {
-                    let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
-                    let buy_id = Bits256::from_hex_str(&buy_order.order_id)?;
-
                     match self.orderbook.match_orders(&sell_id, &buy_id).await {
                         Ok(_) => println!(
                             "✅ Orders matched: sell => `{}`, buy => `{}`!\n",
