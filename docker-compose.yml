@@ -1,6 +1,6 @@
 version: '3.8'
 services:
-  myapp:
+  spark-matcher:
     build: .
     ports:
       - "5003:5003"

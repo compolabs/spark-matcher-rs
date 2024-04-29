@@ -116,7 +116,7 @@ impl SparkMatcher {
                 Ok(_) => (),
                 Err(e) => {
                     println!("An error occurred while matching: `{}`", e);
-                    tokio::time::sleep(Duration::from_millis(5000)).await;
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
                 }
             }
 
