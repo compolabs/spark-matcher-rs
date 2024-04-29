@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  myapp:
+    build: .
+    ports:
+      - "5003:5003"
+    environment:
+      PRIVATE_KEY: "0x<64-hex-symbol-hash>"
+      CONTRACT_ID: "0x<64-hex-symbol-hash>"
+      INDEXER_URL_NO_ORDER_TYPE: "http://localhost:3000/spot/orders?baseToken=0x<64-hex-symbol-hash>&limit=100&isOpened=true"
+    restart: unless-stopped
