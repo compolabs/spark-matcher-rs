@@ -3,15 +3,12 @@ use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use orderbook::{
-    constants::{ORDERBOOK_CONTRACT_ID, RPC, TOKEN_CONTRACT_ID},
+    constants::{RPC, TOKEN_CONTRACT_ID},
     orderbook_utils::Orderbook,
     print_title,
 };
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json;
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 
 use std::str::FromStr;
@@ -24,13 +21,9 @@ use fuels::{
     prelude::{Provider, WalletUnlocked},
     types::{Bits256, ContractId},
 };
-use src20_sdk::token_utils::{Asset, TokenContract};
+use src20_sdk::token_utils::TokenContract;
 
 use dotenv::dotenv;
-
-const MARKET_SYMBOL: &str = "BTC";
-const BASE_SIZE: f64 = 0.01;
-const BASE_PRICE: f64 = 65500.;
 
 #[derive(Eq, PartialEq)]
 pub enum Status {
@@ -120,7 +113,7 @@ impl SparkMatcher {
             self.status = Status::Active;
 
             match self.do_match().await {
-                Ok(_) => tokio::time::sleep(Duration::from_millis(1000)).await,
+                Ok(_) => (),
                 Err(e) => {
                     println!("An error occurred while matching: `{}`", e);
                     tokio::time::sleep(Duration::from_millis(5000)).await;
@@ -167,17 +160,12 @@ impl SparkMatcher {
     }
 
     async fn do_match(&mut self) -> Result<()> {
-        println!("before indexing");
         let (mut sell_orders, mut buy_orders) = (
             Self::fetch_orders_from_indexer(OrderType::Sell).await?,
             Self::fetch_orders_from_indexer(OrderType::Buy).await?,
         );
-        println!(
-            "====after indexing===\nsells: `{:?}`;\nbuys: `{:?}`;\n=====end======\n",
-            &sell_orders, &buy_orders
-        );
+
         for sell_order in &mut sell_orders {
-            println!("sell loop start");
             let (sell_size, sell_price) = (
                 sell_order.base_size.parse::<i128>()?,
                 sell_order.base_price.parse::<i128>()?,
@@ -190,7 +178,6 @@ impl SparkMatcher {
             }
 
             for buy_order in &mut buy_orders {
-                println!("buy loop start");
                 let (buy_size, buy_price) = (
                     buy_order.base_size.parse::<i128>()?,
                     buy_order.base_price.parse::<i128>()?,
@@ -202,13 +189,11 @@ impl SparkMatcher {
                     continue;
                 }
 
-                println!("before match condition checking");
                 if sell_price <= buy_price
                     && sell_size < 0
                     && buy_size > 0
                     && sell_order.base_token == buy_order.base_token
                 {
-                    println!("inside match condition checking");
                     let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
                     let buy_id = Bits256::from_hex_str(&buy_order.order_id)?;
 
@@ -232,7 +217,6 @@ impl SparkMatcher {
             }
         }
 
-        println!("matching returned with Ok");
         Ok(())
     }
 }

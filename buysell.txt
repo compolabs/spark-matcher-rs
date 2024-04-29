@@ -1,0 +1,8 @@
+========== SELLS START ============
+[{"id":1,"order_id":"0xfce2e2bef24e0193d4b158084af14a32578ec65ba4e0f45d14fb18efc80d076d","trader":"0x48c341924c2158802f5522c3499672810023f55a9d1fc0b4f663b183a2122d56","base_token":"0xeb13723dc4e1e325fde9daf552fd829422007332713fd416f9c98a2d775125c7","base_size":"-100000000000","base_price":"9999999999","timestamp":"2024-04-25T16:15:44.000Z","createdAt":"2024-04-26T12:11:27.821Z","updatedAt":"2024-04-26T12:11:27.821Z"}]
+========== SELLS END ===============
+
+========== BUYS START ============
+[{"id":2,"order_id":"0x5dc5a8abd79ae9e0c3b624634a281df74a7f0adda5f924f6f969f617b8fbc88a","trader":"0x48c341924c2158802f5522c3499672810023f55a9d1fc0b4f663b183a2122d56","base_token":"0xeb13723dc4e1e325fde9daf552fd829422007332713fd416f9c98a2d775125c7","base_size":"100000000000","base_price":"10000000000","timestamp":"2024-04-25T16:15:51.000Z","createdAt":"2024-04-26T12:11:27.826Z","updatedAt":"2024-04-26T12:11:27.826Z"}]
+========== BUYS END ===============
+
