@@ -1,12 +1,5 @@
 use anyhow::Result;
-use axum::extract::State;
-use axum::response::IntoResponse;
-use axum::routing::get;
-use orderbook::{
-    constants::{RPC, TOKEN_CONTRACT_ID},
-    orderbook_utils::Orderbook,
-    print_title,
-};
+use orderbook::{constants::RPC, orderbook_utils::Orderbook, print_title};
 use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::Mutex;
@@ -19,9 +12,8 @@ use std::{cmp::Ordering, collections::HashMap};
 use fuels::{
     crypto::SecretKey,
     prelude::{Provider, WalletUnlocked},
-    types::{Bits256, ContractId},
+    types::Bits256,
 };
-use src20_sdk::token_utils::TokenContract;
 
 use dotenv::dotenv;
 
@@ -58,8 +50,6 @@ pub struct IndexerOrder {
 }
 
 pub struct SparkMatcher {
-    wallet: WalletUnlocked,
-    token_contract: TokenContract<WalletUnlocked>,
     orderbook: Orderbook,
     initialized: bool,
     status: Status,
@@ -77,11 +67,6 @@ impl SparkMatcher {
         );
 
         Ok(Self {
-            wallet: wallet.clone(),
-            token_contract: TokenContract::new(
-                &ContractId::from_str(TOKEN_CONTRACT_ID).unwrap().into(),
-                wallet.clone(),
-            ),
             orderbook: Orderbook::new(&wallet, &contract_id).await,
             initialized: true,
             status: Status::Chill,
@@ -236,25 +221,8 @@ async fn main() -> Result<()> {
 
     let matcher = SparkMatcher::init().await?;
     let matcher_clone = matcher.clone();
-    tokio::spawn(async move {
-        let mut locked_matcher = matcher_clone.lock().await;
-        locked_matcher.run().await;
-    });
-
-    let app = axum::Router::new()
-        .route("/", get(echo_ok))
-        .with_state(matcher.clone());
-    let server_addr = format!(
-        "localhost:{}",
-        std::env::var("PORT").unwrap_or(5000.to_string())
-    );
-    let listener = tokio::net::TcpListener::bind(&server_addr).await?;
-    println!("🚀 Server ready at: http://{}", &server_addr);
-    axum::serve(listener, app).await?;
+    let mut locked_matcher = matcher_clone.lock().await;
+    locked_matcher.run().await;
 
     Ok(())
-}
-
-async fn echo_ok() -> impl IntoResponse {
-    "Server is alive 👌"
 }

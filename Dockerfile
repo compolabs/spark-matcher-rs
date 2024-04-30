@@ -19,12 +19,7 @@ WORKDIR /root/
 COPY --from=builder /usr/src/spark-matcher-rs/target/release/spark-matcher .
 
 # Install any runtime dependencies
-RUN apt-get update && apt-get install -y ubuntu-server libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
-
-# Environment variables
-ENV PRIVATE_KEY="0x<64-hex-symbol-hash>"
-ENV CONTRACT_ID="0x<64-hex-symbol-hash>"
-ENV INDEXER_URL_NO_ORDER_TYPE="http://localhost:3000/spot/orders?baseToken=0x<64-hex-symbol-hash>&limit=100&isOpened=true"
+RUN apt-get update && apt-get install -y libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Expose the port the server listens on
 EXPOSE 5003
