@@ -1,6 +1,23 @@
 version: '3.8'
 services:
+  indexer:
+    depends_on:
+      - indexer_database
+    networks:
+      - app-network
+    env_file:
+      - ../orderbook-indexer/.env
+    build: ../orderbook-indexer
+    ports:
+      - "3000:3000"
+
   spark-matcher:
+    depends_on:
+      - indexer
+    networks:
+      - app-network
+    env_file:
+      - ./.env
     build: .
     ports:
       - "5003:5003"
@@ -9,3 +26,19 @@ services:
      - CONTRACT_ID=${CONTRACT_ID}
      - INDEXER_URL_NO_ORDER_TYPE=${INDEXER_URL_NO_ORDER_TYPE}
     restart: unless-stopped
+
+  indexer_database:
+    container_name: indexer_database
+    image: postgres:16
+    networks:
+      - app-network
+    env_file:
+      - ../orderbook-indexer/.env
+    volumes:
+      - indexer_database_data:/var/lib/postgresql/data
+
+volumes:
+  indexer_database_data: {}
+
+networks:
+  app-network:
