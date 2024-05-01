@@ -23,8 +23,6 @@ RUN apt-get update && apt-get install -y libssl3 ca-certificates && rm -rf /var/
 
 # Expose the port the server listens on
 EXPOSE 5003
-EXPOSE 3000
-EXPOSE 5432
 
 # Command to run the executable
 CMD ["./spark-matcher"]
