@@ -6,7 +6,7 @@ services:
     networks:
       - app-network
     env_file:
-      - ../orderbook-indexer/.env
+      - ../orderbook-indexer/.env1
     build: ../orderbook-indexer
     ports:
       - "3000:3000"
