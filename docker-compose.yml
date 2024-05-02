@@ -7,5 +7,5 @@ services:
     environment:
      - PRIVATE_KEY=${PRIVATE_KEY}
      - CONTRACT_ID=${CONTRACT_ID}
-     - INDEXER_URL_NO_ORDER_TYPE=${INDEXER_URL_NO_ORDER_TYPE}
+     - INDEXER_URL=${INDEXER_URL}
     restart: unless-stopped
