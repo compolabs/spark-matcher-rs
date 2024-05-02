@@ -166,6 +166,8 @@ impl SparkMatcher {
                             let buy_fail =
                                 self.fails.entry(buy_order.order_id.clone()).or_insert(0);
                             *buy_fail += 1;
+
+                            tokio::time::sleep(Duration::from_millis(1000)).await;
                         }
                     };
                 }
