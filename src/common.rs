@@ -33,7 +33,7 @@ pub fn ev(key: &str) -> Result<String> {
 
 fn format_indexer_url(order_type: OrderType) -> String {
     let order_type_str = format!(
-        "&orderType={}",
+        "/spot/orders?limit=100&isOpened=true&orderType={}",
         match order_type {
             OrderType::Sell => "sell",
             OrderType::Buy => "buy",
