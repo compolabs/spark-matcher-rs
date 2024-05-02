@@ -111,20 +111,7 @@ impl SparkMatcher {
                 }
                 let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
                 let buy_id = Bits256::from_hex_str(&buy_order.order_id)?;
-                if self.orderbook.order_by_id(&sell_id).await?.value.is_none() {
-                    warn!("👽 Phantom order sell: `{}`.", &sell_order.order_id);
-                    let sell_fail = self.fails.entry(sell_order.order_id.clone()).or_insert(0);
-                    *sell_fail += 1;
 
-                    continue;
-                }
-                if self.orderbook.order_by_id(&buy_id).await?.value.is_none() {
-                    warn!("👽 Phantom order buy: `{}`.", &buy_order.order_id);
-                    let buy_fail = self.fails.entry(buy_order.order_id.clone()).or_insert(0);
-                    *buy_fail += 1;
-
-                    continue;
-                }
                 debug!("==== prices before matching ====\nSell price: `{}`;\n Sell size: `{}`\nBuy price: `{}`;\nBuy size: `{}`;\n ========= end =========", sell_price, sell_size, buy_price, buy_size);
 
                 let price_cond = sell_price <= buy_price;
@@ -135,12 +122,28 @@ impl SparkMatcher {
                 debug!("===== Conditions: =====\nsell_price <= buy_price: `{}`;\nsell_size < 0: `{}`;\nbuy_size > 0: `{}`;\nsell_order.base_token == buy_order.base_token: `{}`\nsell token: `{}`;\nbuy_token: `{}`\n", price_cond, sell_size_cond, buy_size_cond, token_cond, sell_order.base_token, buy_order.base_token);
 
                 if price_cond && sell_size_cond && buy_size_cond && token_cond {
+                    if self.orderbook.order_by_id(&sell_id).await?.value.is_none() {
+                        warn!("👽 Phantom order sell: `{}`.", &sell_order.order_id);
+                        let sell_fail = self.fails.entry(sell_order.order_id.clone()).or_insert(0);
+                        *sell_fail += 1;
+
+                        continue;
+                    }
+                    if self.orderbook.order_by_id(&buy_id).await?.value.is_none() {
+                        warn!("👽 Phantom order buy: `{}`.", &buy_order.order_id);
+                        let buy_fail = self.fails.entry(buy_order.order_id.clone()).or_insert(0);
+                        *buy_fail += 1;
+
+                        continue;
+                    }
+
                     match self.orderbook.match_orders(&sell_id, &buy_id).await {
                         Ok(_) => {
                             info!(
                                 "✅ Orders matched: sell => `{}`, buy => `{}`!\n",
                                 &sell_order.order_id, &buy_order.order_id
                             );
+                            tokio::time::sleep(Duration::from_millis(100)).await;
                             // let amount = if (sell_size.abs()) > buy_size {
                             //     buy_size
                             // } else {
