@@ -143,19 +143,21 @@ impl SparkMatcher {
                                 "✅ Orders matched: sell => `{}`, buy => `{}`!\n",
                                 &sell_order.order_id, &buy_order.order_id
                             );
-                            tokio::time::sleep(Duration::from_millis(100)).await;
-                            // let amount = if (sell_size.abs()) > buy_size {
-                            //     buy_size
-                            // } else {
-                            //     sell_size.abs()
-                            // };
+                            let amount = if (sell_size.abs()) > buy_size {
+                                buy_size
+                            } else {
+                                sell_size.abs()
+                            };
 
-                            // println!("sell size before: `{}`", &sell_order.base_size);
-                            // println!("buy size before: `{}`", &buy_order.base_size);
-                            // sell_order.base_size = (sell_size + amount).to_string();
-                            // buy_order.base_size = (buy_size - amount).to_string();
-                            // println!("sell size after: `{}`", &sell_order.base_size);
-                            // println!("buy size after: `{}`", &buy_order.base_size);
+                            debug!("Transaction amount is: `{}`", &amount);
+                            debug!("sell size before: `{}`", &sell_order.base_size);
+                            debug!("buy size before: `{}`", &buy_order.base_size);
+                            sell_order.base_size = (sell_size + amount).to_string();
+                            buy_order.base_size = (buy_size - amount).to_string();
+                            debug!("sell size after: `{}`", &sell_order.base_size);
+                            debug!("buy size after: `{}`", &buy_order.base_size);
+
+                            tokio::time::sleep(Duration::from_millis(100)).await;
                         }
                         Err(e) => {
                             error!("matching error `{}`", e);
