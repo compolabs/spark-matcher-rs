@@ -95,7 +95,12 @@ impl SparkMatcher {
             if sell_size == 0 {
                 continue;
             }
-            if *self.fails.get(&sell_order.order_id).unwrap_or(&0) > 5 {
+            let sell_fails = *self.fails.get(&sell_order.order_id).unwrap_or(&0);
+            if sell_fails > 5 {
+                debug!(
+                    "Too many fails ({}), skipping sell order `{}`.",
+                    sell_fails, &sell_order.order_id
+                );
                 continue;
             }
             for buy_order in &mut buy_orders {
@@ -106,7 +111,12 @@ impl SparkMatcher {
                 if buy_size == 0 {
                     continue;
                 }
-                if *self.fails.get(&buy_order.order_id).unwrap_or(&0) > 5 {
+                let buy_fails = *self.fails.get(&buy_order.order_id).unwrap_or(&0);
+                if buy_fails > 5 {
+                    debug!(
+                        "Too many fails ({}), skipping buy order `{}`.",
+                        buy_fails, &buy_order.order_id
+                    );
                     continue;
                 }
                 let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
