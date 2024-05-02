@@ -96,6 +96,7 @@ impl SparkMatcher {
                 continue;
             }
             let sell_fails = *self.fails.get(&sell_order.order_id).unwrap_or(&0);
+            debug!("sell fail number before if: `{}`", sell_fails);
             if sell_fails > 5 {
                 debug!(
                     "Too many fails ({}), skipping sell order `{}`.",
@@ -112,6 +113,7 @@ impl SparkMatcher {
                     continue;
                 }
                 let buy_fails = *self.fails.get(&buy_order.order_id).unwrap_or(&0);
+                debug!("Buy fail number before if: `{}`", buy_fails);
                 if buy_fails > 5 {
                     debug!(
                         "Too many fails ({}), skipping buy order `{}`.",
