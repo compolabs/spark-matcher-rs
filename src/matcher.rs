@@ -124,6 +124,7 @@ impl SparkMatcher {
                 if price_cond && sell_size_cond && buy_size_cond && token_cond {
                     if self.orderbook.order_by_id(&sell_id).await?.value.is_none() {
                         warn!("👽 Phantom order sell: `{}`.", &sell_order.order_id);
+                        sell_order.base_size = 0.to_string();
                         let sell_fail = self.fails.entry(sell_order.order_id.clone()).or_insert(0);
                         *sell_fail += 1;
 
@@ -131,6 +132,7 @@ impl SparkMatcher {
                     }
                     if self.orderbook.order_by_id(&buy_id).await?.value.is_none() {
                         warn!("👽 Phantom order buy: `{}`.", &buy_order.order_id);
+                        buy_order.base_size = 0.to_string();
                         let buy_fail = self.fails.entry(buy_order.order_id.clone()).or_insert(0);
                         *buy_fail += 1;
 
