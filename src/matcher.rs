@@ -122,11 +122,30 @@ impl SparkMatcher {
                 debug!("===== Conditions: =====\nsell_price <= buy_price: `{}`;\nsell_size < 0: `{}`;\nbuy_size > 0: `{}`;\nsell_order.base_token == buy_order.base_token: `{}`\nsell token: `{}`;\nbuy_token: `{}`\n", price_cond, sell_size_cond, buy_size_cond, token_cond, sell_order.base_token, buy_order.base_token);
 
                 if price_cond && sell_size_cond && buy_size_cond && token_cond {
+                    let sell_fails_count = *self.fails.get(&sell_order.order_id).unwrap_or(&0);
+                    if sell_fails_count > 5 {
+                        debug!(
+                            "Too many fails ({}), skipping sell order `{}`.",
+                            sell_fails_count, sell_order.order_id
+                        );
+                        continue;
+                    }
+                    let buy_fails_count = *self.fails.get(&buy_order.order_id).unwrap_or(&0);
+                    if buy_fails_count > 5 {
+                        debug!(
+                            "Too many fails ({}), skipping buy order `{}`.",
+                            buy_fails_count, buy_order.order_id
+                        );
+                        continue;
+                    }
+
                     if self.orderbook.order_by_id(&sell_id).await?.value.is_none() {
                         warn!("👽 Phantom order sell: `{}`.", &sell_order.order_id);
+
                         sell_order.base_size = 0.to_string();
                         let sell_fail = self.fails.entry(sell_order.order_id.clone()).or_insert(0);
                         *sell_fail += 1;
+                        debug!("Fail count after phantom sell: `{}`.", *sell_fail);
 
                         continue;
                     }
@@ -135,6 +154,7 @@ impl SparkMatcher {
                         buy_order.base_size = 0.to_string();
                         let buy_fail = self.fails.entry(buy_order.order_id.clone()).or_insert(0);
                         *buy_fail += 1;
+                        debug!("Fail count after phantom buy: `{}`.", *buy_fail);
 
                         continue;
                     }
