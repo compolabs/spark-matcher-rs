@@ -23,7 +23,7 @@ pub struct SparkMatcher {
     orderbook: Orderbook,
     initialized: bool,
     status: Status,
-    fails: HashMap<String, i64>,
+    fails: HashMap<String, usize>,
 }
 
 impl SparkMatcher {
@@ -81,6 +81,9 @@ impl SparkMatcher {
     }
 
     async fn do_match(&mut self) -> Result<()> {
+        let max_fails: usize = ev("MAX_FAIL_COUNT")
+            .unwrap_or("5".to_owned())
+            .parse::<usize>()?;
         let (mut sell_orders, mut buy_orders) = (
             fetch_orders_from_indexer(OrderType::Sell).await?,
             fetch_orders_from_indexer(OrderType::Buy).await?,
@@ -97,7 +100,7 @@ impl SparkMatcher {
             }
             let sell_fails = *self.fails.get(&sell_order.order_id).unwrap_or(&0);
             debug!("sell fail number before if: `{}`", sell_fails);
-            if sell_fails > 5 {
+            if sell_fails > max_fails {
                 debug!(
                     "Too many fails ({}), skipping sell order `{}`.",
                     sell_fails, &sell_order.order_id
@@ -114,7 +117,7 @@ impl SparkMatcher {
                 }
                 let buy_fails = *self.fails.get(&buy_order.order_id).unwrap_or(&0);
                 debug!("Buy fail number before if: `{}`", buy_fails);
-                if buy_fails > 5 {
+                if buy_fails > max_fails {
                     debug!(
                         "Too many fails ({}), skipping buy order `{}`.",
                         buy_fails, &buy_order.order_id
@@ -135,7 +138,7 @@ impl SparkMatcher {
 
                 if price_cond && sell_size_cond && buy_size_cond && token_cond {
                     let sell_fails_count = *self.fails.get(&sell_order.order_id).unwrap_or(&0);
-                    if sell_fails_count > 5 {
+                    if sell_fails_count > max_fails {
                         debug!(
                             "Too many fails ({}), skipping sell order `{}`.",
                             sell_fails_count, sell_order.order_id
@@ -143,7 +146,7 @@ impl SparkMatcher {
                         continue;
                     }
                     let buy_fails_count = *self.fails.get(&buy_order.order_id).unwrap_or(&0);
-                    if buy_fails_count > 5 {
+                    if buy_fails_count > max_fails {
                         debug!(
                             "Too many fails ({}), skipping buy order `{}`.",
                             buy_fails_count, buy_order.order_id
@@ -156,7 +159,7 @@ impl SparkMatcher {
 
                         sell_order.base_size = 0.to_string();
                         let sell_fail = self.fails.entry(sell_order.order_id.clone()).or_insert(0);
-                        *sell_fail += 1;
+                        *sell_fail += max_fails + 1;
                         debug!("Fail count after phantom sell: `{}`.", *sell_fail);
 
                         continue;
@@ -165,7 +168,7 @@ impl SparkMatcher {
                         warn!("👽 Phantom order buy: `{}`.", &buy_order.order_id);
                         buy_order.base_size = 0.to_string();
                         let buy_fail = self.fails.entry(buy_order.order_id.clone()).or_insert(0);
-                        *buy_fail += 1;
+                        *buy_fail += max_fails + 1;
                         debug!("Fail count after phantom buy: `{}`.", *buy_fail);
 
                         continue;
