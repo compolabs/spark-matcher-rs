@@ -8,4 +8,12 @@ services:
      - PRIVATE_KEY=${PRIVATE_KEY}
      - CONTRACT_ID=${CONTRACT_ID}
      - INDEXER_URL=${INDEXER_URL}
+     - MARKET=${MARKET}
+     - PORT=${PORT}
+
+     - LOG_FILE=${LOG_FILE}
+     - FILE_LOG_LEVEL=${FILE_LOG_LEVEL}
+     - CONSOLE_LOG_LEVEL=${CONSOLE_LOG_LEVEL}
+
+     - MAX_FAIL_COUNT=${MAX_FAIL_COUNT}
     restart: unless-stopped
