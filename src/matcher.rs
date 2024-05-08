@@ -88,14 +88,25 @@ impl SparkMatcher {
             fetch_orders_from_indexer(OrderType::Sell).await?,
             fetch_orders_from_indexer(OrderType::Buy).await?,
         );
-        debug!("Sell orders: `{:#?}`", &sell_orders);
-        debug!("Buy orders: `{:#?}`", &buy_orders);
-        for sell_order in &mut sell_orders {
-            let (sell_size, sell_price) = (
+
+        let mut sell_index = 0 as usize;
+        let mut buy_index = 0 as usize;
+        while sell_index < sell_orders.len() && buy_index < buy_orders.len() {
+            let sell_order = sell_orders.get_mut(sell_index).unwrap();
+            let buy_order = buy_orders.get_mut(buy_index).unwrap();
+
+            let (sell_size, sell_price, buy_size, buy_price) = (
                 sell_order.base_size.parse::<i128>()?,
                 sell_order.base_price.parse::<i128>()?,
+                buy_order.base_size.parse::<i128>()?,
+                buy_order.base_price.parse::<i128>()?,
             );
             if sell_size == 0 {
+                sell_index += 1;
+                continue;
+            }
+            if buy_size == 0 {
+                buy_index += 1;
                 continue;
             }
             let sell_fails = *self.fails.get(&sell_order.order_id).unwrap_or(&0);
@@ -105,111 +116,90 @@ impl SparkMatcher {
                     "Too many fails ({}), skipping sell order `{}`.",
                     sell_fails, &sell_order.order_id
                 );
+                sell_index += 1;
                 continue;
             }
-            for buy_order in &mut buy_orders {
-                let (buy_size, buy_price) = (
-                    buy_order.base_size.parse::<i128>()?,
-                    buy_order.base_price.parse::<i128>()?,
+
+            let buy_fails = *self.fails.get(&buy_order.order_id).unwrap_or(&0);
+            debug!("Buy fail number before if: `{}`", buy_fails);
+            if buy_fails > max_fails {
+                debug!(
+                    "Too many fails ({}), skipping buy order `{}`.",
+                    buy_fails, &buy_order.order_id
                 );
-                if buy_size == 0 {
+                buy_index += 1;
+                continue;
+            }
+            let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
+            let buy_id = Bits256::from_hex_str(&buy_order.order_id)?;
+
+            debug!("==== prices before matching ====\nSell price: `{}`;\n Sell size: `{}`\nBuy price: `{}`;\nBuy size: `{}`;\n ========= end =========", sell_price, sell_size, buy_price, buy_size);
+
+            let price_cond = sell_price <= buy_price;
+            let sell_size_cond = sell_size < 0;
+            let buy_size_cond = buy_size > 0;
+            let token_cond = sell_order.base_token == buy_order.base_token;
+
+            debug!("===== Conditions: =====\nsell_price <= buy_price: `{}`;\nsell_size < 0: `{}`;\nbuy_size > 0: `{}`;\nsell_order.base_token == buy_order.base_token: `{}`\nsell token: `{}`;\nbuy_token: `{}`\n", price_cond, sell_size_cond, buy_size_cond, token_cond, sell_order.base_token, buy_order.base_token);
+
+            if price_cond && sell_size_cond && buy_size_cond && token_cond {
+                if self.orderbook.order_by_id(&sell_id).await?.value.is_none() {
+                    warn!("👽 Phantom order sell: `{}`.", &sell_order.order_id);
+
+                    sell_order.base_size = 0.to_string();
+                    let sell_fail = self.fails.entry(sell_order.order_id.clone()).or_insert(0);
+                    *sell_fail += max_fails + 1;
+                    debug!("Fail count after phantom sell: `{}`.", *sell_fail);
+
+                    sell_index += 1;
                     continue;
                 }
-                let buy_fails = *self.fails.get(&buy_order.order_id).unwrap_or(&0);
-                debug!("Buy fail number before if: `{}`", buy_fails);
-                if buy_fails > max_fails {
-                    debug!(
-                        "Too many fails ({}), skipping buy order `{}`.",
-                        buy_fails, &buy_order.order_id
-                    );
+                if self.orderbook.order_by_id(&buy_id).await?.value.is_none() {
+                    warn!("👽 Phantom order buy: `{}`.", &buy_order.order_id);
+                    buy_order.base_size = 0.to_string();
+                    let buy_fail = self.fails.entry(buy_order.order_id.clone()).or_insert(0);
+                    *buy_fail += max_fails + 1;
+                    debug!("Fail count after phantom buy: `{}`.", *buy_fail);
+
+                    buy_index += 1;
                     continue;
                 }
-                let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
-                let buy_id = Bits256::from_hex_str(&buy_order.order_id)?;
 
-                debug!("==== prices before matching ====\nSell price: `{}`;\n Sell size: `{}`\nBuy price: `{}`;\nBuy size: `{}`;\n ========= end =========", sell_price, sell_size, buy_price, buy_size);
-
-                let price_cond = sell_price <= buy_price;
-                let sell_size_cond = sell_size < 0;
-                let buy_size_cond = buy_size > 0;
-                let token_cond = sell_order.base_token == buy_order.base_token;
-
-                debug!("===== Conditions: =====\nsell_price <= buy_price: `{}`;\nsell_size < 0: `{}`;\nbuy_size > 0: `{}`;\nsell_order.base_token == buy_order.base_token: `{}`\nsell token: `{}`;\nbuy_token: `{}`\n", price_cond, sell_size_cond, buy_size_cond, token_cond, sell_order.base_token, buy_order.base_token);
-
-                if price_cond && sell_size_cond && buy_size_cond && token_cond {
-                    let sell_fails_count = *self.fails.get(&sell_order.order_id).unwrap_or(&0);
-                    if sell_fails_count > max_fails {
-                        debug!(
-                            "Too many fails ({}), skipping sell order `{}`.",
-                            sell_fails_count, sell_order.order_id
+                match self.orderbook.match_orders(&sell_id, &buy_id).await {
+                    Ok(_) => {
+                        info!(
+                            "✅ Orders matched: sell => `{}`, buy => `{}`!\n",
+                            &sell_order.order_id, &buy_order.order_id
                         );
-                        continue;
-                    }
-                    let buy_fails_count = *self.fails.get(&buy_order.order_id).unwrap_or(&0);
-                    if buy_fails_count > max_fails {
-                        debug!(
-                            "Too many fails ({}), skipping buy order `{}`.",
-                            buy_fails_count, buy_order.order_id
-                        );
-                        continue;
-                    }
+                        let amount = if (sell_size.abs()) > buy_size {
+                            buy_size
+                        } else {
+                            sell_size.abs()
+                        };
 
-                    if self.orderbook.order_by_id(&sell_id).await?.value.is_none() {
-                        warn!("👽 Phantom order sell: `{}`.", &sell_order.order_id);
+                        debug!("Transaction amount is: `{}`", &amount);
+                        debug!("sell size before: `{}`", &sell_order.base_size);
+                        debug!("buy size before: `{}`", &buy_order.base_size);
+                        sell_order.base_size = (sell_size + amount).to_string();
+                        buy_order.base_size = (buy_size - amount).to_string();
+                        debug!("sell size after: `{}`", &sell_order.base_size);
+                        debug!("buy size after: `{}`", &buy_order.base_size);
 
-                        sell_order.base_size = 0.to_string();
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                    Err(e) => {
+                        error!("matching error `{}`", e);
                         let sell_fail = self.fails.entry(sell_order.order_id.clone()).or_insert(0);
-                        *sell_fail += max_fails + 1;
-                        debug!("Fail count after phantom sell: `{}`.", *sell_fail);
+                        *sell_fail += 1;
+                        sell_index += 1;
 
-                        continue;
-                    }
-                    if self.orderbook.order_by_id(&buy_id).await?.value.is_none() {
-                        warn!("👽 Phantom order buy: `{}`.", &buy_order.order_id);
-                        buy_order.base_size = 0.to_string();
                         let buy_fail = self.fails.entry(buy_order.order_id.clone()).or_insert(0);
-                        *buy_fail += max_fails + 1;
-                        debug!("Fail count after phantom buy: `{}`.", *buy_fail);
+                        *buy_fail += 1;
+                        buy_index += 1;
 
-                        continue;
+                        tokio::time::sleep(Duration::from_millis(1000)).await;
                     }
-
-                    match self.orderbook.match_orders(&sell_id, &buy_id).await {
-                        Ok(_) => {
-                            info!(
-                                "✅ Orders matched: sell => `{}`, buy => `{}`!\n",
-                                &sell_order.order_id, &buy_order.order_id
-                            );
-                            let amount = if (sell_size.abs()) > buy_size {
-                                buy_size
-                            } else {
-                                sell_size.abs()
-                            };
-
-                            debug!("Transaction amount is: `{}`", &amount);
-                            debug!("sell size before: `{}`", &sell_order.base_size);
-                            debug!("buy size before: `{}`", &buy_order.base_size);
-                            sell_order.base_size = (sell_size + amount).to_string();
-                            buy_order.base_size = (buy_size - amount).to_string();
-                            debug!("sell size after: `{}`", &sell_order.base_size);
-                            debug!("buy size after: `{}`", &buy_order.base_size);
-
-                            tokio::time::sleep(Duration::from_millis(100)).await;
-                        }
-                        Err(e) => {
-                            error!("matching error `{}`", e);
-                            let sell_fail =
-                                self.fails.entry(sell_order.order_id.clone()).or_insert(0);
-                            *sell_fail += 1;
-
-                            let buy_fail =
-                                self.fails.entry(buy_order.order_id.clone()).or_insert(0);
-                            *buy_fail += 1;
-
-                            tokio::time::sleep(Duration::from_millis(1000)).await;
-                        }
-                    };
-                }
+                };
             }
         }
 
