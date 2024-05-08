@@ -32,8 +32,10 @@ pub fn ev(key: &str) -> Result<String> {
 }
 
 fn format_indexer_url(order_type: OrderType) -> String {
+    let order_count = ev("FETCH_ORDER_LIMIT").unwrap_or("1000".to_string());
     let order_type_str = format!(
-        "/spot/orders?limit=100&isOpened=true&orderType={}",
+        "/spot/orders?limit={}&isOpened=true&orderType={}",
+        order_count,
         match order_type {
             OrderType::Sell => "sell",
             OrderType::Buy => "buy",
