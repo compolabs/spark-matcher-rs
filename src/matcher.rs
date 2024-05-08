@@ -88,6 +88,10 @@ impl SparkMatcher {
             fetch_orders_from_indexer(OrderType::Sell).await?,
             fetch_orders_from_indexer(OrderType::Buy).await?,
         );
+        debug!(
+            "Sell orders for this match: `{:#?}`\n\nBuy orders for this match: `{:#?}`\n\n",
+            &sell_orders, &buy_orders
+        );
 
         let mut sell_index = 0 as usize;
         let mut buy_index = 0 as usize;
@@ -177,13 +181,8 @@ impl SparkMatcher {
                             sell_size.abs()
                         };
 
-                        debug!("Transaction amount is: `{}`", &amount);
-                        debug!("sell size before: `{}`", &sell_order.base_size);
-                        debug!("buy size before: `{}`", &buy_order.base_size);
                         sell_order.base_size = (sell_size + amount).to_string();
                         buy_order.base_size = (buy_size - amount).to_string();
-                        debug!("sell size after: `{}`", &sell_order.base_size);
-                        debug!("buy size after: `{}`", &buy_order.base_size);
 
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
@@ -200,6 +199,8 @@ impl SparkMatcher {
                         tokio::time::sleep(Duration::from_millis(1000)).await;
                     }
                 };
+            } else if !price_cond {
+                break;
             }
         }
 
