@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 
 use orderbook::{constants::RPC, orderbook_utils::Orderbook};
 
-use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use crate::common::*;
 
@@ -23,7 +23,6 @@ pub struct SparkMatcher {
     orderbook: Orderbook,
     initialized: bool,
     status: Status,
-    fails: HashMap<String, usize>,
 }
 
 impl SparkMatcher {
@@ -41,7 +40,6 @@ impl SparkMatcher {
             orderbook: Orderbook::new(&wallet, &contract_id).await,
             initialized: true,
             status: Status::Chill,
-            fails: HashMap::new(),
         })
     }
 
@@ -81,9 +79,6 @@ impl SparkMatcher {
     }
 
     async fn do_match(&mut self) -> Result<()> {
-        let max_fails: usize = ev("MAX_FAIL_COUNT")
-            .unwrap_or("5".to_owned())
-            .parse::<usize>()?;
         let (mut sell_orders, mut buy_orders) = (
             fetch_orders_from_indexer(OrderType::Sell).await?,
             fetch_orders_from_indexer(OrderType::Buy).await?,
@@ -113,27 +108,7 @@ impl SparkMatcher {
                 buy_index += 1;
                 continue;
             }
-            let sell_fails = *self.fails.get(&sell_order.order_id).unwrap_or(&0);
-            debug!("sell fail number before if: `{}`", sell_fails);
-            if sell_fails > max_fails {
-                debug!(
-                    "Too many fails ({}), skipping sell order `{}`.",
-                    sell_fails, &sell_order.order_id
-                );
-                sell_index += 1;
-                continue;
-            }
 
-            let buy_fails = *self.fails.get(&buy_order.order_id).unwrap_or(&0);
-            debug!("Buy fail number before if: `{}`", buy_fails);
-            if buy_fails > max_fails {
-                debug!(
-                    "Too many fails ({}), skipping buy order `{}`.",
-                    buy_fails, &buy_order.order_id
-                );
-                buy_index += 1;
-                continue;
-            }
             let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
             let buy_id = Bits256::from_hex_str(&buy_order.order_id)?;
 
@@ -151,25 +126,22 @@ impl SparkMatcher {
                     warn!("👽 Phantom order sell: `{}`.", &sell_order.order_id);
 
                     sell_order.base_size = 0.to_string();
-                    let sell_fail = self.fails.entry(sell_order.order_id.clone()).or_insert(0);
-                    *sell_fail += max_fails + 1;
-                    debug!("Fail count after phantom sell: `{}`.", *sell_fail);
-
                     sell_index += 1;
                     continue;
                 }
                 if self.orderbook.order_by_id(&buy_id).await?.value.is_none() {
                     warn!("👽 Phantom order buy: `{}`.", &buy_order.order_id);
-                    buy_order.base_size = 0.to_string();
-                    let buy_fail = self.fails.entry(buy_order.order_id.clone()).or_insert(0);
-                    *buy_fail += max_fails + 1;
-                    debug!("Fail count after phantom buy: `{}`.", *buy_fail);
 
+                    buy_order.base_size = 0.to_string();
                     buy_index += 1;
                     continue;
                 }
 
-                match self.orderbook.match_orders(&sell_id, &buy_id).await {
+                match self
+                    .orderbook
+                    .match_orders_many(vec![sell_id], vec![buy_id])
+                    .await
+                {
                     Ok(_) => {
                         info!(
                             "✅ Orders matched: sell => `{}`, buy => `{}`!\n",
@@ -188,12 +160,8 @@ impl SparkMatcher {
                     }
                     Err(e) => {
                         error!("matching error `{}`", e);
-                        let sell_fail = self.fails.entry(sell_order.order_id.clone()).or_insert(0);
-                        *sell_fail += 1;
-                        sell_index += 1;
 
-                        let buy_fail = self.fails.entry(buy_order.order_id.clone()).or_insert(0);
-                        *buy_fail += 1;
+                        sell_index += 1;
                         buy_index += 1;
 
                         tokio::time::sleep(Duration::from_millis(1000)).await;
