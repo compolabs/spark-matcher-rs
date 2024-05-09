@@ -78,6 +78,9 @@ impl SparkMatcher {
         }
     }
 
+    // TODO: add more debug logging to the new one-to-many algorithm
+    // TODO: the new one-to-many matches some of the matching orders, but not all of them:
+    //       investigate for bugs?
     async fn do_match(&mut self) -> Result<()> {
         let (mut sell_orders, mut buy_orders) = (
             fetch_orders_from_indexer(OrderType::Sell).await?,
@@ -88,87 +91,98 @@ impl SparkMatcher {
             &sell_orders, &buy_orders
         );
 
-        let mut sell_index = 0 as usize;
-        let mut buy_index = 0 as usize;
-        while sell_index < sell_orders.len() && buy_index < buy_orders.len() {
-            let sell_order = sell_orders.get_mut(sell_index).unwrap();
-            let buy_order = buy_orders.get_mut(buy_index).unwrap();
-
-            let (sell_size, sell_price, buy_size, buy_price) = (
-                sell_order.base_size.parse::<i128>()?,
-                sell_order.base_price.parse::<i128>()?,
-                buy_order.base_size.parse::<i128>()?,
-                buy_order.base_price.parse::<i128>()?,
+        let mut sell_index = 0_usize;
+        for the_buy in &mut buy_orders {
+            let buy_id = Bits256::from_hex_str(&the_buy.order_id)?;
+            let mut sells: Vec<String> = vec![];
+            let (buy_size, buy_price) = (
+                the_buy.base_size.parse::<i128>()?,
+                the_buy.base_price.parse::<i128>()?,
             );
-            if sell_size == 0 {
-                sell_index += 1;
-                continue;
-            }
             if buy_size == 0 {
-                buy_index += 1;
                 continue;
             }
 
-            let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
-            let buy_id = Bits256::from_hex_str(&buy_order.order_id)?;
+            let mut transaction_amount: i128 = 0;
+            let mut bail = false;
+            let sell_start = sell_index;
+            while sell_index < sell_orders.len() && buy_size > 0 {
+                let current_sell = sell_orders.get_mut(sell_index).unwrap();
+                let (sell_size, sell_price) = (
+                    current_sell.base_size.parse::<i128>()?,
+                    current_sell.base_price.parse::<i128>()?,
+                );
+                if sell_price > buy_price {
+                    bail = true;
+                    break;
+                }
+                if sell_size >= 0 || the_buy.base_token != current_sell.base_token {
+                    sell_index += 1;
+                    continue;
+                }
 
-            debug!("==== prices before matching ====\nSell price: `{}`;\n Sell size: `{}`\nBuy price: `{}`;\nBuy size: `{}`;\n ========= end =========", sell_price, sell_size, buy_price, buy_size);
-
-            let price_cond = sell_price <= buy_price;
-            let sell_size_cond = sell_size < 0;
-            let buy_size_cond = buy_size > 0;
-            let token_cond = sell_order.base_token == buy_order.base_token;
-
-            debug!("===== Conditions: =====\nsell_price <= buy_price: `{}`;\nsell_size < 0: `{}`;\nbuy_size > 0: `{}`;\nsell_order.base_token == buy_order.base_token: `{}`\nsell token: `{}`;\nbuy_token: `{}`\n", price_cond, sell_size_cond, buy_size_cond, token_cond, sell_order.base_token, buy_order.base_token);
-
-            if price_cond && sell_size_cond && buy_size_cond && token_cond {
+                let sell_id = Bits256::from_hex_str(&current_sell.order_id)?;
                 if self.orderbook.order_by_id(&sell_id).await?.value.is_none() {
-                    warn!("👽 Phantom order sell: `{}`.", &sell_order.order_id);
+                    warn!("👽 Phantom order sell: `{}`.", &current_sell.order_id);
 
-                    sell_order.base_size = 0.to_string();
+                    current_sell.base_size = 0.to_string();
                     sell_index += 1;
                     continue;
                 }
                 if self.orderbook.order_by_id(&buy_id).await?.value.is_none() {
-                    warn!("👽 Phantom order buy: `{}`.", &buy_order.order_id);
+                    warn!("👽 Phantom order buy: `{}`.", &the_buy.order_id);
 
-                    buy_order.base_size = 0.to_string();
-                    buy_index += 1;
-                    continue;
+                    the_buy.base_size = 0.to_string();
+                    break;
                 }
 
-                match self
-                    .orderbook
-                    .match_orders_many(vec![sell_id], vec![buy_id])
-                    .await
-                {
-                    Ok(_) => {
-                        info!(
-                            "✅ Orders matched: sell => `{}`, buy => `{}`!\n",
-                            &sell_order.order_id, &buy_order.order_id
-                        );
-                        let amount = if (sell_size.abs()) > buy_size {
-                            buy_size
-                        } else {
-                            sell_size.abs()
-                        };
+                if transaction_amount + sell_size.abs() > buy_size {
+                    break;
+                } else {
+                    transaction_amount += sell_size.abs();
+                    sells.push(current_sell.order_id.clone());
+                    sell_index += 1;
+                }
+            }
 
-                        sell_order.base_size = (sell_size + amount).to_string();
-                        buy_order.base_size = (buy_size - amount).to_string();
+            if sells.is_empty() {
+                continue;
+            }
+            let sell_end = sell_start + sells.len();
 
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+            match self
+                .orderbook
+                .match_orders_many(
+                    sells
+                        .iter()
+                        .map(|id| Bits256::from_hex_str(id).unwrap())
+                        .collect(),
+                    vec![buy_id],
+                )
+                .await
+            {
+                Ok(_) => {
+                    info!(
+                        "✅ SUCCESS: buy `{}` matched with sells {:#?}\n",
+                        &the_buy.order_id, &sells
+                    );
+
+                    for si in sell_start..sell_end {
+                        sell_orders.get_mut(si).unwrap().base_size = 0.to_string();
                     }
-                    Err(e) => {
-                        error!("matching error `{}`", e);
+                    the_buy.base_size = (buy_size - transaction_amount).to_string();
 
-                        sell_index += 1;
-                        buy_index += 1;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Err(e) => {
+                    error!("Error while matching: `{}`", e);
 
-                        tokio::time::sleep(Duration::from_millis(1000)).await;
-                    }
-                };
-            } else if !price_cond {
-                break;
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                }
+            }
+
+            if bail {
+                return Ok(());
             }
         }
 
