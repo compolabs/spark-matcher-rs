@@ -93,6 +93,7 @@ impl SparkMatcher {
 
         let mut sell_index = 0_usize;
         for the_buy in &mut buy_orders {
+            debug!("\n\n1");
             let buy_id = Bits256::from_hex_str(&the_buy.order_id)?;
             let mut sells: Vec<String> = vec![];
             let (buy_size, buy_price) = (
@@ -102,27 +103,32 @@ impl SparkMatcher {
             if buy_size == 0 {
                 continue;
             }
-
+            debug!("two");
             let mut transaction_amount: i128 = 0;
             let mut bail = false;
             let sell_start = sell_index;
+            debug!("3");
             while sell_index < sell_orders.len() && buy_size > 0 {
+                debug!("4");
                 let current_sell = sell_orders.get_mut(sell_index).unwrap();
                 let (sell_size, sell_price) = (
                     current_sell.base_size.parse::<i128>()?,
                     current_sell.base_price.parse::<i128>()?,
                 );
                 if sell_price > buy_price {
+                    debug!("5");
                     bail = true;
                     break;
                 }
                 if sell_size >= 0 || the_buy.base_token != current_sell.base_token {
+                    debug!("6");
                     sell_index += 1;
                     continue;
                 }
 
                 let sell_id = Bits256::from_hex_str(&current_sell.order_id)?;
                 if self.orderbook.order_by_id(&sell_id).await?.value.is_none() {
+                    debug!("7");
                     warn!("👽 Phantom order sell: `{}`.", &current_sell.order_id);
 
                     current_sell.base_size = 0.to_string();
@@ -130,26 +136,33 @@ impl SparkMatcher {
                     continue;
                 }
                 if self.orderbook.order_by_id(&buy_id).await?.value.is_none() {
+                    debug!("8");
                     warn!("👽 Phantom order buy: `{}`.", &the_buy.order_id);
 
                     the_buy.base_size = 0.to_string();
                     break;
                 }
-
+                debug!("8.5");
                 if transaction_amount + sell_size.abs() > buy_size {
+                    debug!("9");
                     break;
                 } else {
+                    debug!("10");
                     transaction_amount += sell_size.abs();
                     sells.push(current_sell.order_id.clone());
                     sell_index += 1;
                 }
             }
-
+            debug!("11");
             if sells.is_empty() {
+                if bail {
+                    return Ok(());
+                }
+                debug!("12");
                 continue;
             }
             let sell_end = sell_start + sells.len();
-
+            debug!("13");
             match self
                 .orderbook
                 .match_orders_many(
@@ -162,6 +175,7 @@ impl SparkMatcher {
                 .await
             {
                 Ok(_) => {
+                    debug!("14");
                     info!(
                         "✅ SUCCESS: buy `{}` matched with sells {:#?}\n",
                         &the_buy.order_id, &sells
@@ -175,17 +189,19 @@ impl SparkMatcher {
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
                 Err(e) => {
+                    debug!("15");
                     error!("Error while matching: `{}`", e);
 
                     tokio::time::sleep(Duration::from_millis(1000)).await;
                 }
             }
-
+            debug!("16");
             if bail {
+                debug!("17");
                 return Ok(());
             }
         }
-
+        debug!("18");
         Ok(())
     }
 }
