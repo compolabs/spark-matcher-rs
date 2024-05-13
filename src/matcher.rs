@@ -116,7 +116,7 @@ impl SparkMatcher {
                     buy_size
                 );
                 let current_sell = sell_orders.get_mut(sell_index).unwrap();
-                debug!("4.5, current sell id: `{}`;", current_sell.id);
+                debug!("4.5, current sell id: `{}`;", current_sell.order_id);
                 let (sell_size, sell_price) = (
                     current_sell.base_size.parse::<i128>()?,
                     current_sell.base_price.parse::<i128>()?,
