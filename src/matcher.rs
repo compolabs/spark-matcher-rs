@@ -153,16 +153,22 @@ impl SparkMatcher {
                     sell_index += 1;
                 }
             }
-            debug!("11");
+            debug!(
+                "buy id: `{}`,\nsells: `{:#?}`,\nsell_start: `{}`,\nsell_index: `{}`.",
+                the_buy.order_id, &sells, sell_start, sell_index
+            );
             if sells.is_empty() {
+                debug!("12");
                 if bail {
+                    debug!("12.5");
                     return Ok(());
                 }
-                debug!("12");
+
+                sell_index += 1;
                 continue;
             }
             let sell_end = sell_start + sells.len();
-            debug!("13");
+            debug!("13, sell_start: `{}`, sell_end: `{}`", sell_start, sell_end);
             match self
                 .orderbook
                 .match_orders_many(
@@ -182,9 +188,17 @@ impl SparkMatcher {
                     );
 
                     for si in sell_start..sell_end {
+                        debug!(
+                            "inside sell clean loop: sell_start: `{}`, sell_end: `{}`",
+                            sell_start, sell_end
+                        );
                         sell_orders.get_mut(si).unwrap().base_size = 0.to_string();
                     }
                     the_buy.base_size = (buy_size - transaction_amount).to_string();
+                    debug!(
+                        "buy size: `{}`, transaction amount: `{}`, post buy size: `{}`",
+                        buy_size, transaction_amount, the_buy.base_size
+                    );
 
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
