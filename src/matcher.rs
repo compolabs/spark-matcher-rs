@@ -109,8 +109,14 @@ impl SparkMatcher {
             let sell_start = sell_index;
             debug!("3");
             while sell_index < sell_orders.len() && buy_size > 0 {
-                debug!("4");
+                debug!(
+                    "4, sell_index: `{}`, sell_orders.len(): `{}`, buy_size: `{}`",
+                    sell_index,
+                    sell_orders.len(),
+                    buy_size
+                );
                 let current_sell = sell_orders.get_mut(sell_index).unwrap();
+                debug!("4.5, current sell id: `{}`;", current_sell.id);
                 let (sell_size, sell_price) = (
                     current_sell.base_size.parse::<i128>()?,
                     current_sell.base_price.parse::<i128>()?,
@@ -158,9 +164,9 @@ impl SparkMatcher {
                 the_buy.order_id, &sells, sell_start, sell_index
             );
             if sells.is_empty() {
-                debug!("12");
+                debug!("12 Sells are empty");
                 if bail {
-                    debug!("12.5");
+                    debug!("12.5 bailing out!");
                     return Ok(());
                 }
 
