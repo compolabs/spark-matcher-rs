@@ -5,11 +5,12 @@ use fuels::{
     prelude::{Provider, WalletUnlocked},
     types::Bits256,
 };
+
 use tokio::sync::Mutex;
 
 use orderbook::{constants::RPC, orderbook_utils::Orderbook};
 
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 
 use crate::common::*;
 
@@ -78,10 +79,17 @@ impl SparkMatcher {
         }
     }
 
-    // TODO: add more debug logging to the new one-to-many algorithm
-    // TODO: the new one-to-many matches some of the matching orders, but not all of them:
-    //       investigate for bugs?
+    // TODO: test the new algorithm for any missing safety checks
     async fn do_match(&mut self) -> Result<()> {
+        let mut max_batch_size = ev("FETCH_ORDER_LIMIT")
+            .unwrap_or("1000".to_string())
+            .parse::<usize>()?
+            / 10;
+        if max_batch_size < 1 {
+            max_batch_size = 1;
+        }
+        debug!("Max batch size for this match is: `{}`.", max_batch_size);
+
         let (mut sell_orders, mut buy_orders) = (
             fetch_orders_from_indexer(OrderType::Sell).await?,
             fetch_orders_from_indexer(OrderType::Buy).await?,
@@ -91,137 +99,164 @@ impl SparkMatcher {
             &sell_orders, &buy_orders
         );
 
-        let mut sell_index = 0_usize;
-        for the_buy in &mut buy_orders {
-            debug!("\n\n1");
-            let buy_id = Bits256::from_hex_str(&the_buy.order_id)?;
-            let mut sells: Vec<String> = vec![];
-            let (buy_size, buy_price) = (
-                the_buy.base_size.parse::<i128>()?,
-                the_buy.base_price.parse::<i128>()?,
+        let mut sell_index = 0 as usize;
+        let mut buy_index = 0 as usize;
+        let mut sell_batch: HashSet<String> = HashSet::new();
+        let mut buy_batch: HashSet<String> = HashSet::new();
+        while sell_index < sell_orders.len() && buy_index < buy_orders.len() {
+            let sell_order = sell_orders.get_mut(sell_index).unwrap();
+            let buy_order = buy_orders.get_mut(buy_index).unwrap();
+
+            let (sell_size, sell_price, buy_size, buy_price) = (
+                sell_order.base_size.parse::<i128>()?,
+                sell_order.base_price.parse::<i128>()?,
+                buy_order.base_size.parse::<i128>()?,
+                buy_order.base_price.parse::<i128>()?,
             );
-            if buy_size == 0 {
+            if sell_size == 0 {
+                sell_index += 1;
                 continue;
             }
-            debug!("two");
-            let mut transaction_amount: i128 = 0;
-            let mut bail = false;
-            let sell_start = sell_index;
-            debug!("3");
-            while sell_index < sell_orders.len() && buy_size > 0 {
-                debug!(
-                    "4, sell_index: `{}`, sell_orders.len(): `{}`, buy_size: `{}`",
-                    sell_index,
-                    sell_orders.len(),
-                    buy_size
-                );
-                let current_sell = sell_orders.get_mut(sell_index).unwrap();
-                debug!("4.5, current sell id: `{}`;", current_sell.order_id);
-                let (sell_size, sell_price) = (
-                    current_sell.base_size.parse::<i128>()?,
-                    current_sell.base_price.parse::<i128>()?,
-                );
-                if sell_price > buy_price {
-                    debug!("5");
-                    bail = true;
-                    break;
-                }
-                if sell_size >= 0 || the_buy.base_token != current_sell.base_token {
-                    debug!("6");
-                    sell_index += 1;
-                    continue;
-                }
+            if buy_size == 0 {
+                buy_index += 1;
+                continue;
+            }
 
-                let sell_id = Bits256::from_hex_str(&current_sell.order_id)?;
+            let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
+            let buy_id = Bits256::from_hex_str(&buy_order.order_id)?;
+
+            debug!("==== prices before matching ====\nSell price: `{}`;\n Sell size: `{}`\nBuy price: `{}`;\nBuy size: `{}`;\n ========= end =========", sell_price, sell_size, buy_price, buy_size);
+
+            let price_cond = sell_price <= buy_price;
+            let sell_size_cond = sell_size < 0;
+            let buy_size_cond = buy_size > 0;
+            let token_cond = sell_order.base_token == buy_order.base_token;
+
+            debug!("===== Conditions: =====\nsell_price <= buy_price: `{}`;\nsell_size < 0: `{}`;\nbuy_size > 0: `{}`;\nsell_order.base_token == buy_order.base_token: `{}`\nsell token: `{}`;\nbuy_token: `{}`\n", price_cond, sell_size_cond, buy_size_cond, token_cond, sell_order.base_token, buy_order.base_token);
+
+            if price_cond && sell_size_cond && buy_size_cond && token_cond {
                 if self.orderbook.order_by_id(&sell_id).await?.value.is_none() {
-                    debug!("7");
-                    warn!("👽 Phantom order sell: `{}`.", &current_sell.order_id);
+                    warn!("👽 Phantom order sell: `{}`.", &sell_order.order_id);
 
-                    current_sell.base_size = 0.to_string();
+                    sell_order.base_size = 0.to_string();
                     sell_index += 1;
                     continue;
                 }
                 if self.orderbook.order_by_id(&buy_id).await?.value.is_none() {
-                    debug!("8");
-                    warn!("👽 Phantom order buy: `{}`.", &the_buy.order_id);
+                    warn!("👽 Phantom order buy: `{}`.", &buy_order.order_id);
 
-                    the_buy.base_size = 0.to_string();
-                    break;
+                    buy_order.base_size = 0.to_string();
+                    buy_index += 1;
+                    continue;
                 }
-                debug!("8.5");
-                if transaction_amount + sell_size.abs() > buy_size {
-                    debug!("9");
-                    break;
+
+                let amount = if (sell_size.abs()) > buy_size {
+                    buy_size
                 } else {
-                    debug!("10");
-                    transaction_amount += sell_size.abs();
-                    sells.push(current_sell.order_id.clone());
-                    sell_index += 1;
-                }
-            }
-            debug!(
-                "buy id: `{}`,\nsells: `{:#?}`,\nsell_start: `{}`,\nsell_index: `{}`.",
-                the_buy.order_id, &sells, sell_start, sell_index
-            );
-            if sells.is_empty() {
-                debug!("12 Sells are empty");
-                if bail {
-                    debug!("12.5 bailing out!");
-                    return Ok(());
-                }
+                    sell_size.abs()
+                };
+                sell_order.base_size = (sell_size + amount).to_string();
+                buy_order.base_size = (buy_size - amount).to_string();
 
-                sell_index += 1;
-                continue;
-            }
-            let sell_end = sell_start + sells.len();
-            debug!("13, sell_start: `{}`, sell_end: `{}`", sell_start, sell_end);
-            match self
-                .orderbook
-                .match_orders_many(
-                    sells
-                        .iter()
-                        .map(|id| Bits256::from_hex_str(id).unwrap())
-                        .collect(),
-                    vec![buy_id],
-                )
-                .await
-            {
-                Ok(_) => {
-                    debug!("14");
-                    info!(
-                        "✅ SUCCESS: buy `{}` matched with sells {:#?}\n",
-                        &the_buy.order_id, &sells
-                    );
-
-                    for si in sell_start..sell_end {
-                        debug!(
-                            "inside sell clean loop: sell_start: `{}`, sell_end: `{}`",
-                            sell_start, sell_end
-                        );
-                        sell_orders.get_mut(si).unwrap().base_size = 0.to_string();
-                    }
-                    the_buy.base_size = (buy_size - transaction_amount).to_string();
+                // check if we can still stuff another pair of matching orders into the batch
+                if sell_batch.len() < max_batch_size && buy_batch.len() < max_batch_size {
                     debug!(
-                        "buy size: `{}`, transaction amount: `{}`, post buy size: `{}`",
-                        buy_size, transaction_amount, the_buy.base_size
+                        "Found matching orders, adding to batches. sell => `{}`, buy => `{}`!\n",
+                        &sell_order.order_id, &buy_order.order_id
                     );
 
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-                Err(e) => {
-                    debug!("15");
-                    error!("Error while matching: `{}`", e);
+                    sell_batch.insert(sell_order.order_id.clone());
+                    buy_batch.insert(buy_order.order_id.clone());
+                    debug!(
+                        "Control: sell batch: `{:#?}`, buy batch: `{:#?}`",
+                        &sell_batch, &buy_batch
+                    );
+                } else {
+                    // either buy or sell batch is full, time to match
+                    match self
+                        .orderbook
+                        .match_orders_many(
+                            sell_batch
+                                .iter()
+                                .map(|s| Bits256::from_hex_str(s).unwrap())
+                                .collect(),
+                            buy_batch
+                                .iter()
+                                .map(|b| Bits256::from_hex_str(b).unwrap())
+                                .collect(),
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            info!(
+                                "✅ Matched two batches: sells => `{:#?}`, buys => `{:#?}`!\n",
+                                &sell_batch, &buy_batch
+                            );
 
-                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                            sell_batch.clear();
+                            buy_batch.clear();
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                        Err(e) => {
+                            error!("matching error `{}`", e);
+                            error!(
+                            "Tried to match these batches, but failed: sells => `{:#?}`, buys: `{:#?}`.",
+                            sell_batch, buy_batch
+                        );
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+
+                            return Err(e.into());
+                        }
+                    };
                 }
-            }
-            debug!("16");
-            if bail {
-                debug!("17");
-                return Ok(());
+            } else if !price_cond {
+                debug!(
+                    "Bail condition, sell batch: `{:#?}`, buy batch: `{:#?}`",
+                    &sell_batch, &buy_batch
+                );
+                if !sell_batch.is_empty() && !buy_batch.is_empty() {
+                    info!("Matching inside of the bail condition.");
+                    // TODO: This match is copy-pasted. Collapse it into a callable function.
+                    match self
+                        .orderbook
+                        .match_orders_many(
+                            sell_batch
+                                .iter()
+                                .map(|s| Bits256::from_hex_str(s).unwrap())
+                                .collect(),
+                            buy_batch
+                                .iter()
+                                .map(|b| Bits256::from_hex_str(b).unwrap())
+                                .collect(),
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            info!(
+                                "✅ Matched two batches: sells => `{:#?}`, buys => `{:#?}`!\n",
+                                &sell_batch, &buy_batch
+                            );
+
+                            sell_batch.clear();
+                            buy_batch.clear();
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                        Err(e) => {
+                            error!("matching error `{}`", e);
+                            error!(
+                            "Tried to match these batches, but failed: sells => `{:#?}`, buys: `{:#?}`.",
+                            sell_batch, buy_batch
+                        );
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+
+                            return Err(e.into());
+                        }
+                    };
+                }
+                break;
             }
         }
-        debug!("18");
+
         Ok(())
     }
 }
