@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 
 use orderbook::{constants::RPC, orderbook_utils::Orderbook};
 
-use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use crate::common::*;
 
@@ -81,15 +81,6 @@ impl SparkMatcher {
 
     // TODO: test the new algorithm for any missing safety checks
     async fn do_match(&mut self) -> Result<()> {
-        let mut max_batch_size = ev("FETCH_ORDER_LIMIT")
-            .unwrap_or("1000".to_string())
-            .parse::<usize>()?
-            / 10;
-        if max_batch_size < 1 {
-            max_batch_size = 1;
-        }
-        debug!("Max batch size for this match is: `{}`.", max_batch_size);
-
         let (mut sell_orders, mut buy_orders) = (
             fetch_orders_from_indexer(OrderType::Sell).await?,
             fetch_orders_from_indexer(OrderType::Buy).await?,
@@ -101,8 +92,7 @@ impl SparkMatcher {
 
         let mut sell_index = 0 as usize;
         let mut buy_index = 0 as usize;
-        let mut sell_batch: HashSet<String> = HashSet::new();
-        let mut buy_batch: HashSet<String> = HashSet::new();
+        let mut match_pairs: Vec<(String, String)> = vec![];
         while sell_index < sell_orders.len() && buy_index < buy_orders.len() {
             let sell_order = sell_orders.get_mut(sell_index).unwrap();
             let buy_order = buy_orders.get_mut(buy_index).unwrap();
@@ -125,7 +115,7 @@ impl SparkMatcher {
             let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
             let buy_id = Bits256::from_hex_str(&buy_order.order_id)?;
 
-            debug!("==== prices before matching ====\nSell price: `{}`;\n Sell size: `{}`\nBuy price: `{}`;\nBuy size: `{}`;\n ========= end =========", sell_price, sell_size, buy_price, buy_size);
+            debug!("\n==== prices before matching ====\nSell price: `{}`;\n Sell size: `{}`\nBuy price: `{}`;\nBuy size: `{}`;\n ========= end =========", sell_price, sell_size, buy_price, buy_size);
 
             let price_cond = sell_price <= buy_price;
             let sell_size_cond = sell_size < 0;
@@ -158,95 +148,43 @@ impl SparkMatcher {
                 sell_order.base_size = (sell_size + amount).to_string();
                 buy_order.base_size = (buy_size - amount).to_string();
 
-                // check if we can still stuff another pair of matching orders into the batch
-                if sell_batch.len() < max_batch_size && buy_batch.len() < max_batch_size {
-                    debug!(
-                        "Found matching orders, adding to batches. sell => `{}`, buy => `{}`!\n",
-                        &sell_order.order_id, &buy_order.order_id
-                    );
-
-                    sell_batch.insert(sell_order.order_id.clone());
-                    buy_batch.insert(buy_order.order_id.clone());
-                    debug!(
-                        "Control: sell batch: `{:#?}`, buy batch: `{:#?}`",
-                        &sell_batch, &buy_batch
-                    );
-                } else {
-                    // either buy or sell batch is full, time to match
-                    match self
-                        .orderbook
-                        .match_orders_many(
-                            sell_batch
-                                .iter()
-                                .map(|s| Bits256::from_hex_str(s).unwrap())
-                                .collect(),
-                            buy_batch
-                                .iter()
-                                .map(|b| Bits256::from_hex_str(b).unwrap())
-                                .collect(),
-                        )
-                        .await
-                    {
-                        Ok(_) => {
-                            info!(
-                                "✅ Matched two batches: sells => `{:#?}`, buys => `{:#?}`!\n",
-                                &sell_batch, &buy_batch
-                            );
-
-                            sell_batch.clear();
-                            buy_batch.clear();
-                            tokio::time::sleep(Duration::from_millis(100)).await;
-                        }
-                        Err(e) => {
-                            error!("matching error `{}`", e);
-                            error!(
-                            "Tried to match these batches, but failed: sells => `{:#?}`, buys: `{:#?}`.",
-                            sell_batch, buy_batch
-                        );
-                            tokio::time::sleep(Duration::from_millis(500)).await;
-
-                            return Err(e.into());
-                        }
-                    };
-                }
+                debug!("Found a matching pair, adding to the list of matches: (sell: `{}` => buy: `{}`)", &sell_order.order_id, &buy_order.order_id);
+                match_pairs.push((sell_order.order_id.clone(), buy_order.order_id.clone()));
             } else if !price_cond {
-                debug!(
-                    "Bail condition, sell batch: `{:#?}`, buy batch: `{:#?}`",
-                    &sell_batch, &buy_batch
-                );
-                if !sell_batch.is_empty() && !buy_batch.is_empty() {
-                    info!("Matching inside of the bail condition.");
-                    // TODO: This match is copy-pasted. Collapse it into a callable function.
+                debug!("Bail condition, matched pairs: `{:#?}`.", &match_pairs);
+                if !match_pairs.is_empty() {
+                    debug!("Matching inside of the bail condition.");
+
                     match self
                         .orderbook
-                        .match_orders_many(
-                            sell_batch
+                        .match_in_pairs(
+                            match_pairs
                                 .iter()
-                                .map(|s| Bits256::from_hex_str(s).unwrap())
-                                .collect(),
-                            buy_batch
-                                .iter()
-                                .map(|b| Bits256::from_hex_str(b).unwrap())
+                                .map(|(s, b)| {
+                                    (
+                                        Bits256::from_hex_str(s).unwrap(),
+                                        Bits256::from_hex_str(b).unwrap(),
+                                    )
+                                })
                                 .collect(),
                         )
                         .await
                     {
                         Ok(_) => {
                             info!(
-                                "✅ Matched two batches: sells => `{:#?}`, buys => `{:#?}`!\n",
-                                &sell_batch, &buy_batch
+                                "✅ Matched these pairs (sell, buy): => `{:#?}`!\n",
+                                &match_pairs
                             );
 
-                            sell_batch.clear();
-                            buy_batch.clear();
+                            match_pairs.clear();
                             tokio::time::sleep(Duration::from_millis(100)).await;
                         }
                         Err(e) => {
                             error!("matching error `{}`", e);
                             error!(
-                            "Tried to match these batches, but failed: sells => `{:#?}`, buys: `{:#?}`.",
-                            sell_batch, buy_batch
-                        );
+                                "Tried to match these pairs, but failed: (sell, buy) => `{:#?}`.",
+                                &match_pairs
+                            );
                             tokio::time::sleep(Duration::from_millis(500)).await;
 
                             return Err(e.into());
@@ -256,7 +194,44 @@ impl SparkMatcher {
                 break;
             }
         }
+        if !match_pairs.is_empty() {
+            warn!("WARNING: matching on exit from loop, NOT in the bail condition.");
+            match self
+                .orderbook
+                .match_in_pairs(
+                    match_pairs
+                        .iter()
+                        .map(|(s, b)| {
+                            (
+                                Bits256::from_hex_str(s).unwrap(),
+                                Bits256::from_hex_str(b).unwrap(),
+                            )
+                        })
+                        .collect(),
+                )
+                .await
+            {
+                Ok(_) => {
+                    info!(
+                        "✅ Matched these pairs (sell, buy): => `{:#?}`!\n",
+                        &match_pairs
+                    );
 
+                    match_pairs.clear();
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Err(e) => {
+                    error!("matching error `{}`", e);
+                    error!(
+                        "Tried to match these pairs, but failed: (sell, buy) => `{:#?}`.",
+                        &match_pairs
+                    );
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+
+                    return Err(e.into());
+                }
+            };
+        }
         Ok(())
     }
 }
