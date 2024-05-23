@@ -70,16 +70,23 @@ impl SparkMatcher {
     }
 
     async fn do_match(&mut self) -> Result<()> {
-        let max_batch_size: usize = ev("FETCH_ORDER_LIMIT")
+        let mut max_batch_size = ev("FETCH_ORDER_LIMIT")
             .unwrap_or("1000".to_string())
-            .parse()?;
-        let max_batch_size = max_batch_size / 10 + 1; // To ensure it's at least 1
+            .parse::<usize>()?
+            / 10;
+        if max_batch_size < 1 {
+            max_batch_size = 1;
+        }
         debug!("Max batch size for this match is: `{}`.", max_batch_size);
 
-        let (mut sell_orders, mut buy_orders) = (
-            fetch_orders_from_indexer(OrderType::Sell).await?,
-            fetch_orders_from_indexer(OrderType::Buy).await?,
+        let (sell_orders, buy_orders) = tokio::join!(
+            fetch_orders_from_indexer(OrderType::Sell),
+            fetch_orders_from_indexer(OrderType::Buy)
         );
+
+        let mut sell_orders = sell_orders?;
+        let mut buy_orders = buy_orders?;
+
         debug!(
             "Sell orders for this match: `{:#?}`\n\nBuy orders for this match: `{:#?}`\n\n",
             &sell_orders, &buy_orders
@@ -137,9 +144,9 @@ impl SparkMatcher {
                             sell_batch.insert(sell_order.order_id.clone());
                             buy_batch.insert(buy_order.order_id.clone());
                             debug!(
-                                "Found matching orders, adding to batches. sell => `{}`, buy => `{}`!\n",
-                                &sell_order.order_id, &buy_order.order_id
-                            );
+                            "Found matching orders, adding to batches. sell => `{}`, buy => `{}`!\n",
+                            &sell_order.order_id, &buy_order.order_id
+                        );
                         }
                     } else if !price_cond {
                         debug!(
