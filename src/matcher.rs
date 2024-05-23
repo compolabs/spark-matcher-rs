@@ -173,41 +173,8 @@ impl SparkMatcher {
                     );
                 } else {
                     // either buy or sell batch is full, time to match
-                    match self
-                        .orderbook
-                        .match_orders_many(
-                            sell_batch
-                                .iter()
-                                .map(|s| Bits256::from_hex_str(s).unwrap())
-                                .collect(),
-                            buy_batch
-                                .iter()
-                                .map(|b| Bits256::from_hex_str(b).unwrap())
-                                .collect(),
-                        )
-                        .await
-                    {
-                        Ok(_) => {
-                            info!(
-                                "✅ Matched two batches: sells => `{:#?}`, buys => `{:#?}`!\n",
-                                &sell_batch, &buy_batch
-                            );
-
-                            sell_batch.clear();
-                            buy_batch.clear();
-                            tokio::time::sleep(Duration::from_millis(100)).await;
-                        }
-                        Err(e) => {
-                            error!("matching error `{}`", e);
-                            error!(
-                            "Tried to match these batches, but failed: sells => `{:#?}`, buys: `{:#?}`.",
-                            sell_batch, buy_batch
-                        );
-                            tokio::time::sleep(Duration::from_millis(500)).await;
-
-                            return Err(e.into());
-                        }
-                    };
+                    self.match_order_batches(&mut sell_batch, &mut buy_batch)
+                        .await?;
                 }
             } else if !price_cond {
                 debug!(
@@ -217,45 +184,56 @@ impl SparkMatcher {
                 if !sell_batch.is_empty() && !buy_batch.is_empty() {
                     info!("Matching inside of the bail condition.");
                     // TODO: This match is copy-pasted. Collapse it into a callable function.
-                    match self
-                        .orderbook
-                        .match_orders_many(
-                            sell_batch
-                                .iter()
-                                .map(|s| Bits256::from_hex_str(s).unwrap())
-                                .collect(),
-                            buy_batch
-                                .iter()
-                                .map(|b| Bits256::from_hex_str(b).unwrap())
-                                .collect(),
-                        )
-                        .await
-                    {
-                        Ok(_) => {
-                            info!(
-                                "✅ Matched two batches: sells => `{:#?}`, buys => `{:#?}`!\n",
-                                &sell_batch, &buy_batch
-                            );
-
-                            sell_batch.clear();
-                            buy_batch.clear();
-                            tokio::time::sleep(Duration::from_millis(100)).await;
-                        }
-                        Err(e) => {
-                            error!("matching error `{}`", e);
-                            error!(
-                            "Tried to match these batches, but failed: sells => `{:#?}`, buys: `{:#?}`.",
-                            sell_batch, buy_batch
-                        );
-                            tokio::time::sleep(Duration::from_millis(500)).await;
-
-                            return Err(e.into());
-                        }
-                    };
+                    self.match_order_batches(&mut sell_batch, &mut buy_batch)
+                        .await?;
                 }
                 break;
             }
         }
+
+        Ok(())
+    }
+
+    async fn match_order_batches(
+        &mut self,
+        sell_batch: &mut HashSet<String>,
+        buy_batch: &mut HashSet<String>,
+    ) -> Result<()> {
+        match self
+            .orderbook
+            .match_orders_many(
+                sell_batch
+                    .iter()
+                    .map(|s| Bits256::from_hex_str(s).unwrap())
+                    .collect(),
+                buy_batch
+                    .iter()
+                    .map(|b| Bits256::from_hex_str(b).unwrap())
+                    .collect(),
+            )
+            .await
+        {
+            Ok(_) => {
+                info!(
+                    "✅ Matched two batches: sells => `{:#?}`, buys => `{:#?}`!\n",
+                    &sell_batch, &buy_batch
+                );
+
+                sell_batch.clear();
+                buy_batch.clear();
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => {
+                error!("matching error `{}`", e);
+                error!(
+                    "Tried to match these batches, but failed: sells => `{:#?}`, buys: `{:#?}`.",
+                    sell_batch, buy_batch
+                );
+                tokio::time::sleep(Duration::from_millis(500)).await;
+
+                return Err(e.into());
+            }
+        };
 
         Ok(())
     }
