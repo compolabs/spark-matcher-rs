@@ -126,7 +126,7 @@ impl SparkMatcher {
                 sell_order.base_size = (sell_size + amount).to_string();
                 buy_order.base_size = (buy_size - amount).to_string();
 
-                match_pairs.push((sell_order.order_id.clone(), buy_order.order_id.clone()));
+                match_pairs.push((sell_order.id.clone(), buy_order.id.clone()));
                 // debug!(
                 //     "Matched pair: (sell: {}, buy: {})",
                 //     sell_order.order_id, buy_order.order_id
@@ -175,8 +175,8 @@ impl SparkMatcher {
         sell_order: &IndexerOrder,
         buy_order: &IndexerOrder,
     ) -> Result<bool> {
-        let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
-        let buy_id = Bits256::from_hex_str(&buy_order.order_id)?;
+        let sell_id = Bits256::from_hex_str(&sell_order.id)?;
+        let buy_id = Bits256::from_hex_str(&buy_order.id)?;
 
         let sell_is_phantom = self.is_order_phantom(&sell_id).await?;
         let buy_is_phantom = self.is_order_phantom(&buy_id).await?;
@@ -184,7 +184,7 @@ impl SparkMatcher {
         if sell_is_phantom || buy_is_phantom {
             warn!(
                 "👽 Phantom order detected: sell: `{}`, buy: `{}`.",
-                &sell_order.order_id, &buy_order.order_id
+                &sell_order.id, &buy_order.id
             );
         }
 
