@@ -46,7 +46,7 @@ fn format_indexer_url(order_type: OrderType) -> String {
         ev("INDEXER_URL").unwrap_or("<ERROR>".to_owned()),
         order_type_str
     );
-    debug!("Final indexer URL is: `{}`", &url);
+    // debug!("Final indexer URL is: `{}`", &url);
     url
 }
 

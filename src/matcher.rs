@@ -1,13 +1,13 @@
 use ::log::{debug, error, info, warn};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use fuels::{
     crypto::SecretKey,
     prelude::{Provider, WalletUnlocked},
     types::Bits256,
 };
-use tokio::sync::Mutex;
 use orderbook::{constants::RPC, orderbook_utils::Orderbook};
 use std::{str::FromStr, sync::Arc, time::Duration};
+use tokio::sync::Mutex;
 
 use crate::common::*;
 
@@ -46,6 +46,7 @@ impl SparkMatcher {
     }
 
     pub async fn run(&mut self) {
+        info!("Matcher launched, running...");
         self.process_next().await;
     }
 
@@ -76,14 +77,12 @@ impl SparkMatcher {
     }
 
     async fn do_match(&mut self) -> Result<()> {
-        let (mut sell_orders, mut buy_orders) = tokio::try_join!(
-            fetch_orders_from_indexer(OrderType::Sell),
-            fetch_orders_from_indexer(OrderType::Buy)
-        )?;
-        debug!(
-            "Sell orders for this match: `{:#?}`\n\nBuy orders for this match: `{:#?}`\n\n",
-            &sell_orders, &buy_orders
-        );
+        let mut sell_orders = fetch_orders_from_indexer(OrderType::Sell)
+            .await
+            .context("Failed to fetch sell orders")?;
+        let mut buy_orders = fetch_orders_from_indexer(OrderType::Buy)
+            .await
+            .context("Failed to fetch buy orders")?;
 
         let mut match_pairs: Vec<(String, String)> = vec![];
         let mut sell_index = 0;
@@ -100,16 +99,23 @@ impl SparkMatcher {
                 buy_order.base_price.parse::<i128>()?,
             );
 
+            // debug!(
+            //     "Evaluating sell order: {:?}, buy order: {:?}",
+            //     sell_order, buy_order
+            // );
+
             if sell_size == 0 {
-                sell_index += 1;
+                sell_orders.remove(sell_index);
                 continue;
             }
             if buy_size == 0 {
-                buy_index += 1;
+                buy_orders.remove(buy_index);
                 continue;
             }
 
-            if self.match_conditions_met(sell_price, buy_price, sell_size, buy_size, sell_order, buy_order) {
+            if self.match_conditions_met(
+                sell_price, buy_price, sell_size, buy_size, sell_order, buy_order,
+            ) {
                 if self.is_phantom_order(sell_order, buy_order).await? {
                     sell_order.base_size = "0".to_string();
                     buy_order.base_size = "0".to_string();
@@ -121,9 +127,28 @@ impl SparkMatcher {
                 buy_order.base_size = (buy_size - amount).to_string();
 
                 match_pairs.push((sell_order.order_id.clone(), buy_order.order_id.clone()));
+                // debug!(
+                //     "Matched pair: (sell: {}, buy: {})",
+                //     sell_order.order_id, buy_order.order_id
+                // );
+
+                if sell_order.base_size == "0" {
+                    sell_orders.remove(sell_index);
+                } else {
+                    sell_index += 1;
+                }
+
+                if buy_order.base_size == "0" {
+                    buy_orders.remove(buy_index);
+                } else {
+                    buy_index += 1;
+                }
             } else {
-                self.match_pairs(match_pairs.clone()).await?;
-                break;
+                // debug!(
+                //     "Conditions not met for pair: (sell: {}, buy: {})",
+                //     sell_order.order_id, buy_order.order_id
+                // );
+                self.skip_pair(&mut sell_index, &mut buy_index, &sell_orders, &buy_orders);
             }
         }
         self.match_pairs(match_pairs).await?;
@@ -139,13 +164,17 @@ impl SparkMatcher {
         sell_order: &IndexerOrder,
         buy_order: &IndexerOrder,
     ) -> bool {
-        sell_price <= buy_price
+        sell_order.base_token == buy_order.base_token
             && sell_size < 0
             && buy_size > 0
-            && sell_order.base_token == buy_order.base_token
+            && sell_price <= buy_price
     }
 
-    async fn is_phantom_order(&self, sell_order: &IndexerOrder, buy_order: &IndexerOrder) -> Result<bool> {
+    async fn is_phantom_order(
+        &self,
+        sell_order: &IndexerOrder,
+        buy_order: &IndexerOrder,
+    ) -> Result<bool> {
         let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
         let buy_id = Bits256::from_hex_str(&buy_order.order_id)?;
 
@@ -153,7 +182,10 @@ impl SparkMatcher {
         let buy_is_phantom = self.is_order_phantom(&buy_id).await?;
 
         if sell_is_phantom || buy_is_phantom {
-            warn!("👽 Phantom order detected: sell: `{}`, buy: `{}`.", &sell_order.order_id, &buy_order.order_id);
+            warn!(
+                "👽 Phantom order detected: sell: `{}`, buy: `{}`.",
+                &sell_order.order_id, &buy_order.order_id
+            );
         }
 
         Ok(sell_is_phantom || buy_is_phantom)
@@ -169,28 +201,55 @@ impl SparkMatcher {
             return Ok(());
         }
 
-        match self.orderbook.match_in_pairs(
-            match_pairs
-                .iter()
-                .map(|(s, b)| {
-                    (
-                        Bits256::from_hex_str(s).unwrap(),
-                        Bits256::from_hex_str(b).unwrap(),
-                    )
-                })
-                .collect(),
-        ).await {
+        match self
+            .orderbook
+            .match_in_pairs(
+                match_pairs
+                    .iter()
+                    .map(|(s, b)| {
+                        (
+                            Bits256::from_hex_str(s).unwrap(),
+                            Bits256::from_hex_str(b).unwrap(),
+                        )
+                    })
+                    .collect(),
+            )
+            .await
+        {
             Ok(_) => {
-                info!("✅ Matched these pairs (sell, buy): => `{:#?}`!\n", &match_pairs);
+                info!(
+                    "✅ Matched these pairs (sell, buy): => `{:#?}`!\n",
+                    &match_pairs
+                );
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
             Err(e) => {
                 error!("matching error `{}`", e);
-                error!("Tried to match these pairs, but failed: (sell, buy) => `{:#?}`.", &match_pairs);
+                error!(
+                    "Tried to match these pairs, but failed: (sell, buy) => `{:#?}`.",
+                    &match_pairs
+                );
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 return Err(e.into());
             }
         }
         Ok(())
+    }
+
+    fn skip_pair(
+        &self,
+        sell_index: &mut usize,
+        buy_index: &mut usize,
+        sell_orders: &[IndexerOrder],
+        buy_orders: &[IndexerOrder],
+    ) {
+        let sell_order = &sell_orders[*sell_index];
+        let buy_order = &buy_orders[*buy_index];
+
+        if sell_order.base_price > buy_order.base_price {
+            *buy_index += 1;
+        } else {
+            *sell_index += 1;
+        }
     }
 }
