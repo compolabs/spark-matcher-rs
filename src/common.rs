@@ -26,7 +26,8 @@ pub struct IndexerOrder {
 }
 
 pub async fn fetch_orders_from_indexer(order_type: OrderType) -> Result<Vec<IndexerOrder>> {
-    let indexer_url = "http://your-hasura-endpoint.com/v1/graphql"; // Замените на правильный URL вашего GraphQL-эндпоинта
+    println!("Fetching orders...");
+    let indexer_url = "http://13.49.144.58:8080/v1/graphql"; // Замените на правильный URL вашего GraphQL-эндпоинта
     let graphql_query = format!(
         r#"query MyQuery {{
             SpotOrder {{
@@ -51,19 +52,22 @@ pub async fn fetch_orders_from_indexer(order_type: OrderType) -> Result<Vec<Inde
         .await?;
 
     let body = response.text().await?;
+    // println!("Received response body: {:?}", body);
+
     let result: serde_json::Value = serde_json::from_str(&body)?;
 
     let orders_deserialized = serde_json::from_value::<Vec<IndexerOrder>>(
         result["data"]["SpotOrder"].to_owned(),
     )?;
 
+    
     let sort_func: fn(&IndexerOrder, &IndexerOrder) -> Ordering = match order_type {
         OrderType::Buy => |a, b| b.base_price.cmp(&a.base_price),
         OrderType::Sell => |a, b| a.base_price.cmp(&b.base_price),
     };
-
+    
     let mut orders_deserialized = orders_deserialized;
     orders_deserialized.sort_by(sort_func);
-
+    
     Ok(orders_deserialized)
 }
