@@ -20,6 +20,7 @@ serde = { version = "1.0.198", features = ["derive"] }
 log = "0.4.21"
 fern = "0.6.2"
 chrono = "0.4.38"
+itertools = "0.13.0"
 
 [[bin]]
 name = "spark-matcher"
