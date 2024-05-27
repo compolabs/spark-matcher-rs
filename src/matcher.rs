@@ -77,10 +77,10 @@ impl SparkMatcher {
     }
 
     async fn do_match(&mut self) -> Result<()> {
-        let mut sell_orders = fetch_orders_from_indexer()
+        let mut sell_orders = fetch_orders_from_indexer(SpotOrderType::sell)
             .await
             .context("Failed to fetch sell orders")?;
-        let mut buy_orders = fetch_orders_from_indexer()
+        let mut buy_orders = fetch_orders_from_indexer(SpotOrderType::buy)
             .await
             .context("Failed to fetch buy orders")?;
 

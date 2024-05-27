@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use ::log::debug;
 use anyhow::Result;
 use reqwest::Client;
@@ -19,8 +21,8 @@ pub struct IndexerOrder {
 
 #[derive(Debug)]
 pub enum SpotOrderType {
-    Buy,
-    Sell,
+    buy,
+    sell,
 }
 
 impl<'de> Deserialize<'de> for SpotOrderType {
@@ -30,8 +32,8 @@ impl<'de> Deserialize<'de> for SpotOrderType {
     {
         let s: &str = Deserialize::deserialize(deserializer)?;
         match s {
-            "sell" => Ok(SpotOrderType::Sell),
-            "buy" => Ok(SpotOrderType::Buy),
+            "sell" => Ok(SpotOrderType::sell),
+            "buy" => Ok(SpotOrderType::buy),
             _ => Err(serde::de::Error::custom("invalid SpotOrderType")),
         }
     }
@@ -43,15 +45,15 @@ where
 {
     let s: &str = Deserialize::deserialize(deserializer)?;
     match s {
-        "sell" => Ok(SpotOrderType::Sell),
-        "buy" => Ok(SpotOrderType::Buy),
+        "sell" => Ok(SpotOrderType::sell),
+        "buy" => Ok(SpotOrderType::buy),
         _ => Err(serde::de::Error::custom("invalid SpotOrderType")),
     }
 }
 pub fn ev(key: &str) -> Result<String> {
     Ok(std::env::var(key)?)
 }
-pub async fn fetch_orders_from_indexer() -> Result<Vec<IndexerOrder>> {
+pub async fn fetch_orders_from_indexer(order_type: SpotOrderType) -> Result<Vec<IndexerOrder>> {
     let graphql_query = format!(
         r#"query MyQuery {{
             SpotOrder {{
@@ -74,22 +76,25 @@ pub async fn fetch_orders_from_indexer() -> Result<Vec<IndexerOrder>> {
         .header("Content-Type", "application/json")
         .body(serde_json::json!({ "query": graphql_query }).to_string())
         .send()
-        .await?; 
-
-    println!("Response status: {:?}", response.status());
+        .await?;
 
     if response.status().is_success() {
         let json_body = response.text().await?;
-        println!("Response body: {:?}", json_body);
+        // println!("Response body: {:?}", json_body);
 
         let parsed_response: serde_json::Value = serde_json::from_str(&json_body)?;
-        println!("Parsed response: {:?}", parsed_response);
+        // println!("Parsed response: {:?}", parsed_response);
 
-        let orders: Vec<IndexerOrder> =
+        let mut orders: Vec<IndexerOrder> =
             serde_json::from_value(parsed_response["data"]["SpotOrder"].clone())?;
-        for order in &orders[..3] {
-            println!("{:?}", order);
-        }
+
+        // Сортировка в зависимости от типа ордера
+        let sort_func: fn(&IndexerOrder, &IndexerOrder) -> Ordering = match order_type {
+            SpotOrderType::buy => |a, b| b.base_price.cmp(&a.base_price),
+            SpotOrderType::sell => |a, b| a.base_price.cmp(&b.base_price),
+        };
+        orders.sort_by(sort_func);
+
         Ok(orders)
     } else {
         Err(anyhow::anyhow!(
