@@ -8,8 +8,8 @@ use serde::{Deserialize, Deserializer};
 #[derive(Debug, Deserialize)]
 pub struct IndexerOrder {
     pub id: String,
-    pub base_price: String,
-    pub base_size: String,
+    pub base_price: i64,
+    pub base_size: i64,
     pub base_token: String,
     #[serde(rename = "db_write_timestamp")]
     pub db_write_timestamp: String,
@@ -50,9 +50,11 @@ where
         _ => Err(serde::de::Error::custom("invalid SpotOrderType")),
     }
 }
+
 pub fn ev(key: &str) -> Result<String> {
     Ok(std::env::var(key)?)
 }
+
 pub async fn fetch_orders_from_indexer(order_type: SpotOrderType) -> Result<Vec<IndexerOrder>> {
     let graphql_query = format!(
         r#"query MyQuery {{
@@ -69,33 +71,54 @@ pub async fn fetch_orders_from_indexer(order_type: SpotOrderType) -> Result<Vec<
         }}"#
     );
     let indexer_url = ev("INDEXER_URL").unwrap_or("<ERROR>".to_owned());
+    debug!("Indexer URL: {}", indexer_url);
 
     let client = Client::new();
     let response = client
-        .post(indexer_url)
+        .post(&indexer_url)
         .header("Content-Type", "application/json")
         .body(serde_json::json!({ "query": graphql_query }).to_string())
         .send()
         .await?;
 
+    debug!("Response status: {}", response.status());
+
     if response.status().is_success() {
         let json_body = response.text().await?;
-        // println!("Response body: {:?}", json_body);
+        debug!("Full response body length: {}", json_body.len());
 
         let parsed_response: serde_json::Value = serde_json::from_str(&json_body)?;
-        // println!("Parsed response: {:?}", parsed_response);
+        debug!("Full parsed response: {:?}", parsed_response);
 
-        let mut orders: Vec<IndexerOrder> =
-            serde_json::from_value(parsed_response["data"]["SpotOrder"].clone())?;
+        let orders_value = &parsed_response["data"]["SpotOrder"];
+        let limited_orders: Vec<serde_json::Value> = orders_value
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .take(5)
+            .cloned()
+            .collect();
+        debug!("Limited orders: {:?}", limited_orders);
 
-        // Сортировка в зависимости от типа ордера
-        let sort_func: fn(&IndexerOrder, &IndexerOrder) -> Ordering = match order_type {
-            SpotOrderType::buy => |a, b| b.base_price.cmp(&a.base_price),
-            SpotOrderType::sell => |a, b| a.base_price.cmp(&b.base_price),
-        };
-        orders.sort_by(sort_func);
+        match serde_json::from_value::<Vec<IndexerOrder>>(orders_value.clone()) {
+            Ok(mut orders) => {
+                debug!("Parsed orders: {:?}", orders.iter().take(5).collect::<Vec<_>>());
 
-        Ok(orders)
+                // Сортировка в зависимости от типа ордера
+                let sort_func: fn(&IndexerOrder, &IndexerOrder) -> Ordering = match order_type {
+                    SpotOrderType::buy => |a, b| b.base_price.cmp(&a.base_price),
+                    SpotOrderType::sell => |a, b| a.base_price.cmp(&b.base_price),
+                };
+                orders.sort_by(sort_func);
+
+                debug!("Sorted orders: {:?}", orders.iter().take(20).collect::<Vec<_>>());
+                Ok(orders)
+            }
+            Err(e) => {
+                debug!("Error deserializing orders: {:?}", e);
+                Err(anyhow::anyhow!("Error deserializing orders: {:?}", e))
+            }
+        }
     } else {
         Err(anyhow::anyhow!(
             "Request failed with status: {}",
@@ -103,4 +126,3 @@ pub async fn fetch_orders_from_indexer(order_type: SpotOrderType) -> Result<Vec<
         ))
     }
 }
-
