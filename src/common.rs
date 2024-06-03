@@ -35,14 +35,18 @@ fn format_graphql_query(order_type: OrderType) -> String {
         "query": format!(
             r#"
             query {{
-                SpotOrder(limit: {}, where: {{order_type: {{_eq: "{}"}}}}, order_by: {{base_price: {}}}) {{
-                    id
-                    trader
-                    timestamp
-                    order_type
-                    base_size
-                    base_token
-                    base_price
+                SpotOrder(
+                    limit: {}, 
+                    where: {{order_type: {{_eq: "{}"}}, base_size: {{_neq: "0"}}}}, 
+                    order_by: {{base_price: {}}}
+                ) {{
+                        id
+                        trader
+                        timestamp
+                        order_type
+                        base_size
+                        base_token
+                        base_price
                 }}
             }}"#,
             limit, order_type_str, order_by
@@ -54,7 +58,7 @@ fn format_graphql_query(order_type: OrderType) -> String {
 
 pub async fn fetch_orders_from_indexer(order_type: OrderType) -> Result<Vec<SpotOrder>> {
     let graphql_query = format_graphql_query(order_type);
-    let graphql_url = ev("INDEXER_URL").unwrap_or_else(|_| "http://13.49.144.58:8080/v1/graphql".to_string());
+    let graphql_url = ev("INDEXER_URL").unwrap();
 
     let client = Client::new();
     let response = client
