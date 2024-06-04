@@ -171,7 +171,11 @@ impl SparkMatcher {
                 }
             }
         }
-        self.match_pairs(match_pairs).await?;
+        println!("match_pairs = {:?}", match_pairs.len());
+        for pair in match_pairs {
+            println!("pair = {:?}", pair);
+            self.match_pairs(vec![pair]).await?;
+        }
         Ok(())
     }
 
