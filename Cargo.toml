@@ -7,10 +7,10 @@ authors = ["Oleksii Kshenskyi <oleksii.kshenskyi@uatechpeople.com>"]
 license = "Apache-2.0"
 
 [dependencies]
-fuels = { version = "0.55.1", features = ["fuel-core-lib"] }
+fuels = { version = "0.63", features = ["fuel-core-lib"] }
 rand = "0.8.5"
 tokio = { version = "1.12", features = ["rt", "macros"] }
-orderbook = { git = "https://github.com/compolabs/orderbook-contract.git", branch = "master" }
+orderbook = { path = "../orderbook-contract" }
 dotenv = "0.15.0"
 hex = "0.4"
 anyhow = "1.0.82"
@@ -20,7 +20,7 @@ serde = { version = "1.0.198", features = ["derive"] }
 log = "0.4.21"
 fern = "0.6.2"
 chrono = "0.4.38"
-
+simplelog = "0.9"
 [[bin]]
 name = "spark-matcher"
 path = "src/main.rs"

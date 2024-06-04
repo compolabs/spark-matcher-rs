@@ -122,8 +122,8 @@ impl SparkMatcher {
                 continue;
             }
 
-            let sell_id = Bits256::from_hex_str(&sell_order.order_id)?;
-            let buy_id = Bits256::from_hex_str(&buy_order.order_id)?;
+            let sell_id = Bits256::from_hex_str(&sell_order.id)?;
+            let buy_id = Bits256::from_hex_str(&buy_order.id)?;
 
             debug!("==== prices before matching ====\nSell price: `{}`;\n Sell size: `{}`\nBuy price: `{}`;\nBuy size: `{}`;\n ========= end =========", sell_price, sell_size, buy_price, buy_size);
 
@@ -136,14 +136,14 @@ impl SparkMatcher {
 
             if price_cond && sell_size_cond && buy_size_cond && token_cond {
                 if self.orderbook.order_by_id(&sell_id).await?.value.is_none() {
-                    warn!("👽 Phantom order sell: `{}`.", &sell_order.order_id);
+                    warn!("👽 Phantom order sell: `{}`.", &sell_order.id);
 
                     sell_order.base_size = 0.to_string();
                     sell_index += 1;
                     continue;
                 }
                 if self.orderbook.order_by_id(&buy_id).await?.value.is_none() {
-                    warn!("👽 Phantom order buy: `{}`.", &buy_order.order_id);
+                    warn!("👽 Phantom order buy: `{}`.", &buy_order.id);
 
                     buy_order.base_size = 0.to_string();
                     buy_index += 1;
@@ -162,11 +162,11 @@ impl SparkMatcher {
                 if sell_batch.len() < max_batch_size && buy_batch.len() < max_batch_size {
                     debug!(
                         "Found matching orders, adding to batches. sell => `{}`, buy => `{}`!\n",
-                        &sell_order.order_id, &buy_order.order_id
+                        &sell_order.id, &buy_order.id
                     );
 
-                    sell_batch.insert(sell_order.order_id.clone());
-                    buy_batch.insert(buy_order.order_id.clone());
+                    sell_batch.insert(sell_order.id.clone());
+                    buy_batch.insert(buy_order.id.clone());
                     debug!(
                         "Control: sell batch: `{:#?}`, buy batch: `{:#?}`",
                         &sell_batch, &buy_batch
