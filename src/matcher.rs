@@ -92,6 +92,9 @@ impl SparkMatcher {
             "Buy orders: {:?}",
             buy_orders.iter().take(5).collect::<Vec<_>>()
         );
+        
+        sell_orders.sort_by(|a, b| a.base_price.cmp(&b.base_price));
+        buy_orders.sort_by(|a, b| b.base_price.cmp(&a.base_price));
 
         let mut match_pairs: Vec<(String, String)> = vec![];
         let mut sell_index = 0;
@@ -125,15 +128,6 @@ impl SparkMatcher {
                 "Matching sell order: {:?}, buy order: {:?}",
                 sell_order, buy_order
             );
-
-            if sell_size == 0 {
-                sell_orders.remove(sell_index);
-                continue;
-            }
-            if buy_size == 0 {
-                buy_orders.remove(buy_index);
-                continue;
-            }
 
             // Проверяем, могут ли ордера быть совпавшими
             if self.match_conditions_met(
