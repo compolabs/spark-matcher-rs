@@ -92,9 +92,6 @@ impl SparkMatcher {
             "Buy orders: {:?}",
             buy_orders.iter().take(5).collect::<Vec<_>>()
         );
-        
-        sell_orders.sort_by(|a, b| a.base_price.cmp(&b.base_price));
-        buy_orders.sort_by(|a, b| b.base_price.cmp(&a.base_price));
 
         let mut match_pairs: Vec<(String, String)> = vec![];
         let mut sell_index = 0;
@@ -131,7 +128,7 @@ impl SparkMatcher {
 
             // Проверяем, могут ли ордера быть совпавшими
             if self.match_conditions_met(
-                sell_price, buy_price, sell_size, buy_size, sell_order, buy_order,
+                sell_price, buy_price, sell_order, buy_order,
             ) {
                 if self.is_phantom_order(sell_order, buy_order).await? {
                     sell_order.base_size = "0".to_string();
@@ -140,7 +137,7 @@ impl SparkMatcher {
                 }
 
                 let amount = sell_size.abs().min(buy_size);
-                sell_order.base_size = (sell_size + amount).to_string();
+                sell_order.base_size = (sell_size - amount).to_string();
                 buy_order.base_size = (buy_size - amount).to_string();
 
                 match_pairs.push((sell_order.id.clone(), buy_order.id.clone()));
@@ -173,18 +170,16 @@ impl SparkMatcher {
         Ok(())
     }
 
-    fn match_conditions_met(
+  fn match_conditions_met(
         &self,
         sell_price: i128,
         buy_price: i128,
-        sell_size: i128,
-        buy_size: i128,
         sell_order: &SpotOrder,
         buy_order: &SpotOrder,
     ) -> bool {
         sell_order.base_token == buy_order.base_token
-            && sell_size < 0
-            && buy_size > 0
+            && sell_order.order_type == "sell"
+            && buy_order.order_type == "buy"
             && sell_price <= buy_price
     }
 
@@ -196,8 +191,8 @@ impl SparkMatcher {
         let sell_id = Bits256::from_hex_str(&sell_order.id)?;
         let buy_id = Bits256::from_hex_str(&buy_order.id)?;
 
-        let sell_is_phantom = self.is_order_phantom(&sell_id).await?;
-        let buy_is_phantom = self.is_order_phantom(&buy_id).await?;
+        let sell_is_phantom = self.is_phantom(&sell_id).await?;
+        let buy_is_phantom = self.is_phantom(&buy_id).await?;
 
         if sell_is_phantom {
             warn!("👽 Phantom order detected: sell: `{}`.", &sell_order.id);
@@ -210,7 +205,7 @@ impl SparkMatcher {
         Ok(sell_is_phantom || buy_is_phantom)
     }
 
-    async fn is_order_phantom(&self, id: &Bits256) -> Result<bool> {
+    async fn is_phantom(&self, id: &Bits256) -> Result<bool> {
         let order = self.orderbook.order_by_id(id).await?;
         Ok(order.value.is_none())
     }
