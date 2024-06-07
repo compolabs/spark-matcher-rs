@@ -1,3 +1,4 @@
+use crate::common::*;
 use ::log::{debug, error, info, warn};
 use anyhow::{Context, Result};
 use fuels::{
@@ -6,19 +7,23 @@ use fuels::{
     types::Bits256,
 };
 use orderbook::{constants::RPC, orderbook_utils::Orderbook};
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{
+    str::FromStr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::Mutex;
+use tokio::task::spawn_blocking;
+use tokio::try_join;
 
-use crate::common::*;
-
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Clone)]
 pub enum Status {
     Chill,
     Active,
 }
 
 pub struct SparkMatcher {
-    orderbook: Orderbook,
+    orderbook: Arc<Mutex<Orderbook>>,
     initialized: bool,
     status: Status,
 }
@@ -35,7 +40,7 @@ impl SparkMatcher {
 
         debug!("Setup SparkMatcher correctly.");
         Ok(Self {
-            orderbook: Orderbook::new(&wallet, &contract_id).await,
+            orderbook: Arc::new(Mutex::new(Orderbook::new(&wallet, &contract_id).await)),
             initialized: true,
             status: Status::Chill,
         })
@@ -53,36 +58,46 @@ impl SparkMatcher {
     async fn process_next(&mut self) {
         loop {
             if !self.initialized {
-                tokio::time::sleep(Duration::from_millis(1000)).await;
+                // Уменьшенное время ожидания для избежания перегрузки процессора
+                // tokio::time::sleep(Duration::from_millis(10)).await;
                 continue;
             }
 
             if self.status == Status::Active {
-                tokio::time::sleep(Duration::from_millis(1000)).await;
+                // Уменьшенное время ожидания для избежания перегрузки процессора
+                // tokio::time::sleep(Duration::from_millis(10)).await;
                 continue;
             }
 
             self.status = Status::Active;
 
+            let start_time = Instant::now();
             match self.do_match().await {
                 Ok(_) => (),
                 Err(e) => {
                     error!("An error occurred while matching: `{}`", e);
-                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                    // Уменьшенное время ожидания для избежания перегрузки процессора
+                    // tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             }
+            let duration = start_time.elapsed();
+            info!("Время выполнения do_match: {:?}", duration);
 
             self.status = Status::Chill;
         }
     }
 
     async fn do_match(&mut self) -> Result<()> {
-        let mut sell_orders = fetch_orders_from_indexer(OrderType::Sell)
-            .await
-            .context("Failed to fetch sell orders")?;
-        let mut buy_orders = fetch_orders_from_indexer(OrderType::Buy)
-            .await
-            .context("Failed to fetch buy orders")?;
+        let fetch_start_time = Instant::now();
+
+        let (mut sell_orders, mut buy_orders) = try_join!(
+            fetch_orders_from_indexer(OrderType::Sell),
+            fetch_orders_from_indexer(OrderType::Buy)
+        )
+        .context("Failed to fetch orders")?;
+
+        let fetch_duration = fetch_start_time.elapsed();
+        info!("Время выполнения fetch_orders: {:?}", fetch_duration);
 
         debug!(
             "Sell orders: {:?}",
@@ -93,6 +108,7 @@ impl SparkMatcher {
             buy_orders.iter().take(5).collect::<Vec<_>>()
         );
 
+        let match_pairs_start_time = Instant::now();
         let mut match_pairs: Vec<(String, String)> = vec![];
         let mut sell_index = 0;
         let mut buy_index = 0;
@@ -126,11 +142,14 @@ impl SparkMatcher {
                 sell_order, buy_order
             );
 
-            if sell_size == 0 {
+            if sell_order.base_size == "0" {
+                debug!("Удаление ордера на продажу c ID: {}", sell_order.id);
                 sell_orders.remove(sell_index);
                 continue;
             }
-            if buy_size == 0 {
+
+            if buy_order.base_size == "0" {
+                debug!("Удаление ордера на покупку c ID: {}", buy_order.id);
                 buy_orders.remove(buy_index);
                 continue;
             }
@@ -171,11 +190,37 @@ impl SparkMatcher {
                 }
             }
         }
-        println!("match_pairs = {:?}", match_pairs.len());
-        for pair in match_pairs {
-            println!("pair = {:?}", pair);
-            self.match_pairs(vec![pair]).await?;
+
+        let match_pairs_duration = match_pairs_start_time.elapsed();
+        info!(
+            "Время выполнения сопоставления ордеров: {:?}",
+            match_pairs_duration
+        );
+
+        info!("match_pairs = {:?}", match_pairs.len());
+
+        // Параллельная обработка match_pairs
+        let orderbook = self.orderbook.clone();
+        let match_tasks: Vec<_> = match_pairs
+            .into_iter()
+            .map(|pair| {
+                let orderbook = orderbook.clone();
+                spawn_blocking(move || {
+                    let matcher = SparkMatcher {
+                        orderbook,
+                        initialized: true,
+                        status: Status::Active,
+                    };
+                    tokio::runtime::Handle::current()
+                        .block_on(async move { matcher.match_pairs(vec![pair]).await })
+                })
+            })
+            .collect();
+
+        for task in match_tasks {
+            task.await??;
         }
+
         Ok(())
     }
 
@@ -217,7 +262,7 @@ impl SparkMatcher {
     }
 
     async fn is_order_phantom(&self, id: &Bits256) -> Result<bool> {
-        let order = self.orderbook.order_by_id(id).await?;
+        let order = self.orderbook.lock().await.order_by_id(id).await?;
         Ok(order.value.is_none())
     }
 
@@ -226,8 +271,12 @@ impl SparkMatcher {
             return Ok(());
         }
 
+        let match_pairs_start_time = Instant::now();
+
         match self
             .orderbook
+            .lock()
+            .await
             .match_in_pairs(
                 match_pairs
                     .iter()
@@ -246,7 +295,8 @@ impl SparkMatcher {
                     "✅ Matched these pairs (sell, buy): => `{:#?}`!\n",
                     &match_pairs
                 );
-                tokio::time::sleep(Duration::from_millis(1000)).await;
+                let match_pairs_duration = match_pairs_start_time.elapsed();
+                info!("Время выполнения match_pairs: {:?}", match_pairs_duration);
             }
             Err(e) => {
                 error!("matching error `{}`", e);
@@ -254,7 +304,11 @@ impl SparkMatcher {
                     "Tried to match these pairs, but failed: (sell, buy) => `{:#?}`.",
                     &match_pairs
                 );
-                tokio::time::sleep(Duration::from_millis(5000)).await;
+                let match_pairs_duration = match_pairs_start_time.elapsed();
+                info!(
+                    "Время выполнения match_pairs (c ошибкой): {:?}",
+                    match_pairs_duration
+                );
                 return Err(e.into());
             }
         }

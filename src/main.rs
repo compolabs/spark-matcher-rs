@@ -1,14 +1,11 @@
 mod common;
 mod log;
 mod matcher;
-
+use crate::matcher::*;
 use ::log::info;
 use anyhow::Result;
-use orderbook::print_title;
-
 use dotenv::dotenv;
-
-use crate::matcher::*;
+use orderbook::print_title;
 
 #[tokio::main]
 async fn main() -> Result<()> {
