@@ -7,11 +7,7 @@ use fuels::{
     types::Bits256,
 };
 use orderbook::{constants::RPC, orderbook_utils::Orderbook};
-use std::{
-    str::FromStr,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{str::FromStr, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
 use tokio::try_join;
@@ -58,13 +54,11 @@ impl SparkMatcher {
     async fn process_next(&mut self) {
         loop {
             if !self.initialized {
-                // Уменьшенное время ожидания для избежания перегрузки процессора
                 // tokio::time::sleep(Duration::from_millis(10)).await;
                 continue;
             }
 
             if self.status == Status::Active {
-                // Уменьшенное время ожидания для избежания перегрузки процессора
                 // tokio::time::sleep(Duration::from_millis(10)).await;
                 continue;
             }
@@ -76,7 +70,6 @@ impl SparkMatcher {
                 Ok(_) => (),
                 Err(e) => {
                     error!("An error occurred while matching: `{}`", e);
-                    // Уменьшенное время ожидания для избежания перегрузки процессора
                     // tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             }
@@ -142,18 +135,6 @@ impl SparkMatcher {
                 sell_order, buy_order
             );
 
-            if sell_order.base_size == "0" {
-                debug!("Удаление ордера на продажу c ID: {}", sell_order.id);
-                sell_orders.remove(sell_index);
-                continue;
-            }
-
-            if buy_order.base_size == "0" {
-                debug!("Удаление ордера на покупку c ID: {}", buy_order.id);
-                buy_orders.remove(buy_index);
-                continue;
-            }
-
             // Проверяем, могут ли ордера быть совпавшими
             if self.match_conditions_met(
                 sell_price, buy_price, sell_size, buy_size, sell_order, buy_order,
@@ -169,18 +150,6 @@ impl SparkMatcher {
                 buy_order.base_size = (buy_size - amount).to_string();
 
                 match_pairs.push((sell_order.id.clone(), buy_order.id.clone()));
-
-                if sell_order.base_size == "0" {
-                    sell_orders.remove(sell_index);
-                } else {
-                    sell_index += 1;
-                }
-
-                if buy_order.base_size == "0" {
-                    buy_orders.remove(buy_index);
-                } else {
-                    buy_index += 1;
-                }
             } else {
                 // Увеличиваем индексы для следующих проверок
                 if sell_price > buy_price {
