@@ -1,4 +1,7 @@
+use std::time::Instant;
+
 use anyhow::{Context, Result};
+use log::info;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
@@ -25,6 +28,9 @@ pub fn ev(key: &str) -> Result<String> {
 }
 
 fn format_graphql_query(order_type: OrderType) -> String {
+    // let start_time = Instant::now();
+    // info!("Начало выполнения format_graphql_query для типа ордера: {:?}", order_type);
+
     let limit = ev("FETCH_ORDER_LIMIT").unwrap_or_else(|_| "100".to_string());
     let (order_type_str, order_by) = match order_type {
         OrderType::Sell => ("sell", "asc"),
@@ -53,10 +59,16 @@ fn format_graphql_query(order_type: OrderType) -> String {
         )
     });
 
+    // let duration = start_time.elapsed();
+    // info!("Время выполнения format_graphql_query для типа ордера {:?}: {:?}", order_type, duration);
+
     query.to_string()
 }
 
 pub async fn fetch_orders_from_indexer(client: &Client, order_type: OrderType) -> Result<Vec<SpotOrder>> {
+    let start_time = Instant::now();
+    info!("Начало выполнения fetch_orders_from_indexer для типа ордера: {:?}", order_type);
+
     let graphql_query = format_graphql_query(order_type);
     let graphql_url = ev("INDEXER_URL")?;
 
@@ -68,12 +80,17 @@ pub async fn fetch_orders_from_indexer(client: &Client, order_type: OrderType) -
         .await
         .context("Failed to send request to indexer")?;
 
-    if response.status().is_success() {
+    let orders = if response.status().is_success() {
         let json_response: serde_json::Value = response.json().await?;
         let orders: Vec<SpotOrder> = serde_json::from_value(json_response["data"]["SpotOrder"].clone())
             .context("Failed to parse orders from response")?;
         Ok(orders)
     } else {
         Err(anyhow::anyhow!("Request failed with status: {}", response.status()))
-    }
+    };
+
+    let duration = start_time.elapsed();
+    info!("Время выполнения fetch_orders_from_indexer для типа ордера {:?}: {:?}", order_type, duration);
+
+    orders
 }

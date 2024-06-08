@@ -58,12 +58,10 @@ impl SparkMatcher {
     async fn process_next(&mut self) {
         loop {
             if !self.initialized {
-                // tokio::time::sleep(Duration::from_millis(10)).await;
                 continue;
             }
 
             if self.status == Status::Active {
-                // tokio::time::sleep(Duration::from_millis(10)).await;
                 continue;
             }
 
@@ -74,7 +72,6 @@ impl SparkMatcher {
                 Ok(_) => (),
                 Err(e) => {
                     error!("An error occurred while matching: `{}`", e);
-                    // tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             }
             let duration = start_time.elapsed();
