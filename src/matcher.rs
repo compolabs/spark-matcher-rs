@@ -51,7 +51,7 @@ impl SparkMatcher {
     }
 
     pub async fn run(&mut self) {
-        info!("Matcher launched, running...");
+        info!("Matcher running...");
         self.process_next().await;
     }
 
