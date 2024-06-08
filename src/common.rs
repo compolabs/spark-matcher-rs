@@ -56,17 +56,17 @@ fn format_graphql_query(order_type: OrderType) -> String {
     query.to_string()
 }
 
-pub async fn fetch_orders_from_indexer(order_type: OrderType) -> Result<Vec<SpotOrder>> {
+pub async fn fetch_orders_from_indexer(client: &Client, order_type: OrderType) -> Result<Vec<SpotOrder>> {
     let graphql_query = format_graphql_query(order_type);
-    let graphql_url = ev("INDEXER_URL").unwrap();
+    let graphql_url = ev("INDEXER_URL")?;
 
-    let client = Client::new();
     let response = client
         .post(&graphql_url)
         .header("Content-Type", "application/json")
         .body(graphql_query)
         .send()
-        .await?;
+        .await
+        .context("Failed to send request to indexer")?;
 
     if response.status().is_success() {
         let json_response: serde_json::Value = response.json().await?;

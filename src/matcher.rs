@@ -1,5 +1,5 @@
 use crate::common::*;
-use ::log::{debug, error, info, warn};
+use ::log::{debug, error, info};
 use anyhow::{Context, Result};
 use fuels::{
     crypto::SecretKey,
@@ -7,6 +7,7 @@ use fuels::{
     types::Bits256,
 };
 use orderbook::{constants::RPC, orderbook_utils::Orderbook};
+use reqwest::Client;
 use std::{str::FromStr, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
 use tokio::task::spawn_blocking;
@@ -20,6 +21,7 @@ pub enum Status {
 
 pub struct SparkMatcher {
     orderbook: Arc<Mutex<Orderbook>>,
+    client: Client,
     initialized: bool,
     status: Status,
 }
@@ -33,10 +35,12 @@ impl SparkMatcher {
             SecretKey::from_str(&private_key)?,
             Some(provider.clone()),
         );
+        let client = Client::new();
 
         debug!("Setup SparkMatcher correctly.");
         Ok(Self {
             orderbook: Arc::new(Mutex::new(Orderbook::new(&wallet, &contract_id).await)),
+            client,
             initialized: true,
             status: Status::Chill,
         })
@@ -84,22 +88,13 @@ impl SparkMatcher {
         let fetch_start_time = Instant::now();
 
         let (mut sell_orders, mut buy_orders) = try_join!(
-            fetch_orders_from_indexer(OrderType::Sell),
-            fetch_orders_from_indexer(OrderType::Buy)
+            fetch_orders_from_indexer(&self.client, OrderType::Sell),
+            fetch_orders_from_indexer(&self.client, OrderType::Buy)
         )
         .context("Failed to fetch orders")?;
 
         let fetch_duration = fetch_start_time.elapsed();
         info!("Время выполнения fetch_orders: {:?}", fetch_duration);
-
-        debug!(
-            "Sell orders: {:?}",
-            sell_orders.iter().take(5).collect::<Vec<_>>()
-        );
-        debug!(
-            "Buy orders: {:?}",
-            buy_orders.iter().take(5).collect::<Vec<_>>()
-        );
 
         let match_pairs_start_time = Instant::now();
         let mut match_pairs: Vec<(String, String)> = vec![];
@@ -139,12 +134,6 @@ impl SparkMatcher {
             if self.match_conditions_met(
                 sell_price, buy_price, sell_size, buy_size, sell_order, buy_order,
             ) {
-                if self.is_phantom_order(sell_order, buy_order).await? {
-                    sell_order.base_size = "0".to_string();
-                    buy_order.base_size = "0".to_string();
-                    continue;
-                }
-
                 let amount = sell_size.abs().min(buy_size);
                 sell_order.base_size = (sell_size + amount).to_string();
                 buy_order.base_size = (buy_size - amount).to_string();
@@ -170,13 +159,16 @@ impl SparkMatcher {
 
         // Параллельная обработка match_pairs
         let orderbook = self.orderbook.clone();
+        let client = self.client.clone();
         let match_tasks: Vec<_> = match_pairs
             .into_iter()
             .map(|pair| {
                 let orderbook = orderbook.clone();
+                let client = client.clone();
                 spawn_blocking(move || {
                     let matcher = SparkMatcher {
                         orderbook,
+                        client,
                         initialized: true,
                         status: Status::Active,
                     };
@@ -206,33 +198,6 @@ impl SparkMatcher {
             && sell_size < 0
             && buy_size > 0
             && sell_price <= buy_price
-    }
-
-    async fn is_phantom_order(
-        &self,
-        sell_order: &SpotOrder,
-        buy_order: &SpotOrder,
-    ) -> Result<bool> {
-        let sell_id = Bits256::from_hex_str(&sell_order.id)?;
-        let buy_id = Bits256::from_hex_str(&buy_order.id)?;
-
-        let sell_is_phantom = self.is_order_phantom(&sell_id).await?;
-        let buy_is_phantom = self.is_order_phantom(&buy_id).await?;
-
-        if sell_is_phantom {
-            warn!("👽 Phantom order detected: sell: `{}`.", &sell_order.id);
-        }
-
-        if buy_is_phantom {
-            warn!("👽 Phantom order detected: buy: `{}`.", &buy_order.id);
-        }
-
-        Ok(sell_is_phantom || buy_is_phantom)
-    }
-
-    async fn is_order_phantom(&self, id: &Bits256) -> Result<bool> {
-        let order = self.orderbook.lock().await.order_by_id(id).await?;
-        Ok(order.value.is_none())
     }
 
     async fn match_pairs(&self, match_pairs: Vec<(String, String)>) -> Result<()> {
