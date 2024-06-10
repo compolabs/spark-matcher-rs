@@ -1,3 +1,37 @@
-# spark-matcher-rs
+### Задание
 
-This is a repo for rewriting the existing [spark-matcher](https://github.com/compolabs/spark-matcher) in Rust.
+У вас есть следующий контракт ордербука (упрощенная ABI для тестового задания):
+
+```rust
+pub struct Order {
+    pub id: b256, 
+    pub trader: Address,
+    pub base_token: AssetId,
+    pub base_size: I64,
+    pub base_price: u64,
+}
+
+abi OrderBook {
+    #[storage(read, write), payable]
+    fn open_order(base_token: AssetId, base_size: I64, order_price: u64) -> b256;
+
+    #[storage(read, write)]
+    fn cancel_order(order_id: b256);
+
+    #[storage(read, write)]
+    fn match_orders(order_sell_id: b256, order_buy_id: b256);
+}
+```
+
+**Что такое Order:**
+Обычная лимитная заявка (Limit Order): Заявка на покупку или продажу ценных бумаг по конкретной или более выгодной цене. Если цена рынка не соответствует указанной в заявке, она не будет выполнена до тех пор, пока цена не достигнет указанного уровня. Заявка может быть исполнена полностью или частично. При частичном исполнении заявки исполнена будет только та часть, на которую есть достаточное встречное предложение по цене и объему.
+
+Заказ состоит из следующих полей:
+- **id: b256** - это хеш от trader, base_token и base_price.
+- **trader: Address** - адрес человека, который создал заказ.
+- **base_token: AssetId** - каждый заказ открывается по отношению к USD. К примеру, если мы хотим купить BTC за USD или продать BTC за USD, то base_token будет BTC.
+- **base_size: I64** - это объем заказа. Для оптимизации мы сделали такую логику, что если base_size положительный, то заказ на покупку, а если base_size отрицательный, то на продажу.
+- **base_price: u64** - это цена, по которой trader выставил заказ.
+
+**Требуется:**
+Разработать псевдокод (не обязательно рабочий код) алгоритма матчинг механизма. Это такой механизм, который берет данные из ордербука и матчит заказы по цене и времени.
