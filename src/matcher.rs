@@ -21,6 +21,7 @@ pub struct SparkMatcher {
     orderbook: Orderbook,
     initialized: bool,
     status: Status,
+    ignore_list: Vec<String>,
 }
 
 impl SparkMatcher {
@@ -38,6 +39,7 @@ impl SparkMatcher {
             orderbook: Orderbook::new(&wallet, &contract_id).await,
             initialized: true,
             status: Status::Chill,
+            ignore_list: vec![],
         })
     }
 
@@ -71,7 +73,7 @@ impl SparkMatcher {
                     tokio::time::sleep(Duration::from_millis(1000)).await;
                 }
             }
-
+            self.ignore_list = vec![];
             self.status = Status::Chill;
         }
     }
@@ -172,9 +174,11 @@ impl SparkMatcher {
             }
         }
         println!("match_pairs = {:?}", match_pairs.len());
-        for pair in match_pairs {
-            println!("pair = {:?}", pair);
-            self.match_pairs(vec![pair]).await?;
+        let res = self.match_pairs(match_pairs.clone()).await;
+        if res.is_err() {
+            for pair in match_pairs {
+                self.match_pairs(vec![pair]).await?;
+            }
         }
         Ok(())
     }
@@ -188,14 +192,16 @@ impl SparkMatcher {
         sell_order: &SpotOrder,
         buy_order: &SpotOrder,
     ) -> bool {
-        sell_order.base_token == buy_order.base_token
+        !self.ignore_list.contains(&sell_order.id)
+            && !self.ignore_list.contains(&buy_order.id)
+            && sell_order.base_token == buy_order.base_token
             && sell_size < 0
             && buy_size > 0
             && sell_price <= buy_price
     }
 
     async fn is_phantom_order(
-        &self,
+        &mut self,
         sell_order: &SpotOrder,
         buy_order: &SpotOrder,
     ) -> Result<bool> {
@@ -207,10 +213,12 @@ impl SparkMatcher {
 
         if sell_is_phantom {
             warn!("👽 Phantom order detected: sell: `{}`.", &sell_order.id);
+            self.ignore_list.push(sell_order.id.clone())
         }
 
         if buy_is_phantom {
             warn!("👽 Phantom order detected: buy: `{}`.", &buy_order.id);
+            self.ignore_list.push(buy_order.id.clone())
         }
 
         Ok(sell_is_phantom || buy_is_phantom)
