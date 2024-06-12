@@ -138,11 +138,11 @@ impl SparkMatcher {
                 match_pairs.push((sell_order.id.clone(), buy_order.id.clone()));
             } else {
                 // Увеличиваем индексы для следующих проверок
-                if sell_price > buy_price {
-                    buy_index += 1;
-                } else {
+                // if sell_price > buy_price {
+                //     buy_index += 1;
+                // } else {
                     sell_index += 1;
-                }
+                // }
             }
         }
 
