@@ -12,7 +12,7 @@ async fn main() -> Result<()> {
     print_title("Spark's Rust Matcher");
     dotenv().ok();
     log::setup_logging()?;
-    info!("Matcher launched, running...");
+    info!("Matcher launched...");
 
     let matcher = SparkMatcher::init().await?;
     let matcher_clone = matcher.clone();
