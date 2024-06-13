@@ -124,7 +124,7 @@ impl SparkMatcher {
 
         if !match_pairs.is_empty() {
             let match_pairs_exec_start = Instant::now();
-            if let Err(e) = self.match_pairs(match_pairs.clone()).await {
+            if let Err(_e) = self.match_pairs(match_pairs.clone()).await {
                 for pair in match_pairs {
                     if let Err(e) = self.match_single_pair(pair).await {
                         error!("Failed to match single pair: {}", e);
@@ -153,7 +153,6 @@ impl SparkMatcher {
             let sell_order = sell_orders.get_mut(sell_index).unwrap();
             let buy_order = buy_orders.get_mut(buy_index).unwrap();
 
-            // Преобразование строк в числа
             let (sell_size, sell_price, buy_size, buy_price) = (
                 sell_order
                     .base_size
@@ -302,7 +301,7 @@ impl SparkMatcher {
         match self.orderbook.match_in_pairs(pairs).await {
             Ok(_) => {
                 info!(
-                    "✅ Matched these pairs (sell, buy): => `{:#?}`!\n",
+                    "✅✅✅ Matched these pairs (sell, buy): => `{:#?}`!\n",
                     &match_pairs
                 );
             }
