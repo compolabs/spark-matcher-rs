@@ -10,7 +10,7 @@ license = "Apache-2.0"
 fuels = { version = "0.63.1", features = ["fuel-core-lib"] }
 rand = "0.8.5"
 tokio = { version = "1.12", features = ["rt", "macros"] }
-orderbook = { path = "../orderbook-contract" }
+orderbook = { git = "https://github.com/compolabs/orderbook-contract.git", branch = "testnet" }
 dotenv = "0.15.0"
 hex = "0.4"
 anyhow = "1.0.82"
