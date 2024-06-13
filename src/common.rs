@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
+use tokio::time::Instant;
+use log::{error, info};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum OrderType {
@@ -57,6 +59,7 @@ fn format_graphql_query(order_type: OrderType) -> String {
 }
 
 pub async fn fetch_orders_from_indexer(order_type: OrderType, client: &Client) -> Result<Vec<SpotOrder>> {
+    let start = Instant::now();
     let graphql_query = format_graphql_query(order_type);
     let graphql_url = ev("INDEXER_URL").unwrap();
 
@@ -72,8 +75,18 @@ pub async fn fetch_orders_from_indexer(order_type: OrderType, client: &Client) -
         let orders: Vec<SpotOrder> =
             serde_json::from_value(json_response["data"]["SpotOrder"].clone())
                 .context("Failed to parse orders from response")?;
+        let duration = start.elapsed();
+        match order_type {
+            OrderType::Sell => info!("fetch_orders_from_indexer(Sell) executed in {:?}", duration),
+            OrderType::Buy => info!("fetch_orders_from_indexer(Buy) executed in {:?}", duration),
+        }
         Ok(orders)
     } else {
+        let duration = start.elapsed();
+        match order_type {
+            OrderType::Sell => error!("fetch_orders_from_indexer(Sell) failed in {:?} with status: {}", duration, response.status()),
+            OrderType::Buy => error!("fetch_orders_from_indexer(Buy) failed in {:?} with status: {}", duration, response.status()),
+        }
         Err(anyhow::anyhow!(
             "Request failed with status: {}",
             response.status()
