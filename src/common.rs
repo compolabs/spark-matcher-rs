@@ -56,11 +56,10 @@ fn format_graphql_query(order_type: OrderType) -> String {
     query.to_string()
 }
 
-pub async fn fetch_orders_from_indexer(order_type: OrderType) -> Result<Vec<SpotOrder>> {
+pub async fn fetch_orders_from_indexer(order_type: OrderType, client: &Client) -> Result<Vec<SpotOrder>> {
     let graphql_query = format_graphql_query(order_type);
     let graphql_url = ev("INDEXER_URL").unwrap();
 
-    let client = Client::new();
     let response = client
         .post(&graphql_url)
         .header("Content-Type", "application/json")

@@ -7,6 +7,7 @@ use anyhow::Result;
 use orderbook::print_title;
 
 use dotenv::dotenv;
+use reqwest::Client;
 
 use crate::matcher::*;
 
@@ -17,7 +18,8 @@ async fn main() -> Result<()> {
     log::setup_logging()?;
     info!("Matcher launched, running...");
 
-    let matcher = SparkMatcher::init().await?;
+    let client = Client::new();
+    let matcher = SparkMatcher::init(client).await?;
     let matcher_clone = matcher.clone();
     let mut locked_matcher = matcher_clone.lock().await;
     locked_matcher.run().await;

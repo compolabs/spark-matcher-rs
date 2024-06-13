@@ -6,6 +6,7 @@ use fuels::{
     types::Bits256,
 };
 use orderbook::{constants::RPC, orderbook_utils::Orderbook};
+use reqwest::Client;
 use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
@@ -22,10 +23,11 @@ pub struct SparkMatcher {
     initialized: bool,
     status: Status,
     ignore_list: Vec<String>,
+    client: Client,
 }
 
 impl SparkMatcher {
-    pub async fn new() -> Result<Self> {
+    pub async fn new(client: Client) -> Result<Self> {
         let provider = Provider::connect(RPC).await?;
         let private_key = ev("PRIVATE_KEY")?;
         let contract_id = ev("CONTRACT_ID")?;
@@ -40,11 +42,12 @@ impl SparkMatcher {
             initialized: true,
             status: Status::Chill,
             ignore_list: vec![],
+            client,
         })
     }
 
-    pub async fn init() -> Result<Arc<Mutex<Self>>> {
-        Ok(Arc::new(Mutex::new(SparkMatcher::new().await?)))
+    pub async fn init(client: Client) -> Result<Arc<Mutex<Self>>> {
+        Ok(Arc::new(Mutex::new(SparkMatcher::new(client).await?)))
     }
 
     pub async fn run(&mut self) {
@@ -79,10 +82,10 @@ impl SparkMatcher {
     }
 
     async fn do_match(&mut self) -> Result<()> {
-        let mut sell_orders = fetch_orders_from_indexer(OrderType::Sell)
+        let mut sell_orders = fetch_orders_from_indexer(OrderType::Sell, &self.client)
             .await
             .context("Failed to fetch sell orders")?;
-        let mut buy_orders = fetch_orders_from_indexer(OrderType::Buy)
+        let mut buy_orders = fetch_orders_from_indexer(OrderType::Buy, &self.client)
             .await
             .context("Failed to fetch buy orders")?;
 
