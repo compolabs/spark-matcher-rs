@@ -21,7 +21,7 @@ pub enum Status {
 }
 
 pub struct SparkMatcher {
-    orderbook: Orderbook,
+    orderbook: Arc<Mutex<Orderbook>>,
     initialized: bool,
     status: Status,
     ignore_list: Vec<String>,
@@ -44,7 +44,7 @@ impl SparkMatcher {
         info!("SparkMatcher::new executed in {:?}", duration);
 
         Ok(Self {
-            orderbook: Orderbook::new(&wallet, &contract_id).await,
+            orderbook: Arc::new(Mutex::new(Orderbook::new(&wallet, &contract_id).await)),
             initialized: true,
             status: Status::Chill,
             ignore_list: vec![],
@@ -118,13 +118,18 @@ impl SparkMatcher {
         );
 
         let match_pairs_start = Instant::now();
-        let match_pairs = self.find_matching_pairs(&mut sell_orders, &mut buy_orders).await?;
+        let match_pairs = self
+            .find_matching_pairs(&mut sell_orders, &mut buy_orders)
+            .await?;
         let match_pairs_duration = match_pairs_start.elapsed();
-        info!("SparkMatcher::find_matching_pairs executed in {:?}", match_pairs_duration);
+        info!(
+            "SparkMatcher::find_matching_pairs executed in {:?}",
+            match_pairs_duration
+        );
 
         if !match_pairs.is_empty() {
             let match_pairs_exec_start = Instant::now();
-            if let Err(e) = self.match_pairs(match_pairs.clone()).await {
+            if let Err(_e) = self.match_pairs(match_pairs.clone()).await {
                 for pair in match_pairs {
                     if let Err(e) = self.match_single_pair(pair).await {
                         error!("Failed to match single pair: {}", e);
@@ -132,7 +137,10 @@ impl SparkMatcher {
                 }
             }
             let match_pairs_exec_duration = match_pairs_exec_start.elapsed();
-            info!("SparkMatcher::match_pairs executed in {:?}", match_pairs_exec_duration);
+            info!(
+                "SparkMatcher::match_pairs executed in {:?}",
+                match_pairs_exec_duration
+            );
         }
         let duration = start.elapsed();
         info!("SparkMatcher::do_match executed in {:?}", duration);
@@ -153,7 +161,6 @@ impl SparkMatcher {
             let sell_order = sell_orders.get_mut(sell_index).unwrap();
             let buy_order = buy_orders.get_mut(buy_index).unwrap();
 
-            // Преобразование строк в числа
             let (sell_size, sell_price, buy_size, buy_price) = (
                 sell_order
                     .base_size
@@ -179,10 +186,12 @@ impl SparkMatcher {
             );
 
             if sell_size == 0 {
+                info!("Sell order with size 0 found: {:?}", sell_order);
                 sell_index += 1;
                 continue;
             }
             if buy_size == 0 {
+                info!("Buy order with size 0 found: {:?}", buy_order);
                 buy_index += 1;
                 continue;
             }
@@ -195,11 +204,17 @@ impl SparkMatcher {
                     sell_order.base_size = "0".to_string();
                     buy_order.base_size = "0".to_string();
                     let is_phantom_order_duration = is_phantom_order_start.elapsed();
-                    info!("SparkMatcher::is_phantom_order executed in {:?}", is_phantom_order_duration);
+                    info!(
+                        "SparkMatcher::is_phantom_order executed in {:?}",
+                        is_phantom_order_duration
+                    );
                     continue;
                 }
                 let is_phantom_order_duration = is_phantom_order_start.elapsed();
-                info!("SparkMatcher::is_phantom_order executed in {:?}", is_phantom_order_duration);
+                info!(
+                    "SparkMatcher::is_phantom_order executed in {:?}",
+                    is_phantom_order_duration
+                );
 
                 let amount = sell_size.abs().min(buy_size);
                 sell_order.base_size = (sell_size + amount).to_string();
@@ -224,7 +239,10 @@ impl SparkMatcher {
         }
 
         let duration = start.elapsed();
-        info!("SparkMatcher::find_matching_pairs executed in {:?}", duration);
+        info!(
+            "SparkMatcher::find_matching_pairs executed in {:?}",
+            duration
+        );
         Ok(match_pairs)
     }
 
@@ -277,7 +295,8 @@ impl SparkMatcher {
 
     async fn is_order_phantom(&self, id: &Bits256) -> Result<bool> {
         let start = Instant::now();
-        let order = self.orderbook.order_by_id(id).await?;
+        let orderbook = self.orderbook.lock().await;
+        let order = orderbook.order_by_id(id).await?;
         let duration = start.elapsed();
         info!("SparkMatcher::is_order_phantom executed in {:?}", duration);
         Ok(order.value.is_none())
@@ -289,32 +308,17 @@ impl SparkMatcher {
         }
 
         let start = Instant::now();
-        let pairs: Vec<_> = match_pairs
-            .iter()
-            .map(|(s, b)| {
-                (
-                    Bits256::from_hex_str(s).unwrap(),
-                    Bits256::from_hex_str(b).unwrap(),
-                )
-            })
-            .collect();
 
-        match self.orderbook.match_in_pairs(pairs).await {
-            Ok(_) => {
-                info!(
-                    "✅ Matched these pairs (sell, buy): => `{:#?}`!\n",
-                    &match_pairs
-                );
-            }
-            Err(e) => {
-                error!("matching error `{}`", e);
-                error!(
-                    "Tried to match these pairs, but failed: (sell, buy) => `{:#?}`.",
-                    &match_pairs
-                );
-                return Err(e.into());
+        for (sell, buy) in match_pairs {
+            let sell_id = Bits256::from_hex_str(&sell).unwrap();
+            let buy_id = Bits256::from_hex_str(&buy).unwrap();
+
+            let orderbook = self.orderbook.lock().await;
+            if let Err(e) = orderbook.match_in_pairs(vec![(sell_id, buy_id)]).await {
+                error!("Failed to match pair: {:?}, Error: {:?}", (sell, buy), e);
             }
         }
+
         let duration = start.elapsed();
         info!("SparkMatcher::match_pairs executed in {:?}", duration);
         Ok(())
@@ -323,13 +327,19 @@ impl SparkMatcher {
     async fn match_single_pair(&self, pair: (String, String)) -> Result<()> {
         let start = Instant::now();
         let (sell, buy) = pair;
-        self.orderbook
+
+        let orderbook = self.orderbook.lock().await;
+        orderbook
             .match_in_pairs(vec![(
                 Bits256::from_hex_str(&sell).unwrap(),
                 Bits256::from_hex_str(&buy).unwrap(),
             )])
             .await?;
-        info!("✅ Matched single pair (sell, buy): => `({}, {})`\n", sell, buy);
+
+        info!(
+            "✅ Matched single pair (sell, buy): => `({}, {})`\n",
+            sell, buy
+        );
         let duration = start.elapsed();
         info!("SparkMatcher::match_single_pair executed in {:?}", duration);
         Ok(())
