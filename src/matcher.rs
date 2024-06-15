@@ -108,14 +108,14 @@ impl SparkMatcher {
         let mut sell_orders = sell_orders_result.context("Failed to fetch sell orders")?;
         let mut buy_orders = buy_orders_result.context("Failed to fetch buy orders")?;
 
-        debug!(
-            "Sell orders: {:?}",
-            sell_orders.iter().take(5).collect::<Vec<_>>()
-        );
-        debug!(
-            "Buy orders: {:?}",
-            buy_orders.iter().take(5).collect::<Vec<_>>()
-        );
+        // debug!(
+        //     "Sell orders: {:?}",
+        //     sell_orders.iter().take(5).collect::<Vec<_>>()
+        // );
+        // debug!(
+        //     "Buy orders: {:?}",
+        //     buy_orders.iter().take(5).collect::<Vec<_>>()
+        // );
 
         let match_pairs_start = Instant::now();
         let match_pairs = self.find_matching_pairs(&mut sell_orders, &mut buy_orders).await?;
@@ -172,10 +172,10 @@ impl SparkMatcher {
                     .context("Invalid buy order price")?,
             );
 
-            debug!(
-                "Matching sell order: {:?}, buy order: {:?}",
-                sell_order, buy_order
-            );
+            // debug!(
+            //     "Matching sell order: {:?}, buy order: {:?}",
+            //     sell_order, buy_order
+            // );
 
             if sell_size == 0 {
                 sell_index += 1;
@@ -194,11 +194,11 @@ impl SparkMatcher {
                     sell_order.base_size = "0".to_string();
                     buy_order.base_size = "0".to_string();
                     let is_phantom_order_duration = is_phantom_order_start.elapsed();
-                    info!("SparkMatcher::is_phantom_order executed in {:?}", is_phantom_order_duration);
+                    // info!("SparkMatcher::is_phantom_order executed in {:?}", is_phantom_order_duration);
                     continue;
                 }
                 let is_phantom_order_duration = is_phantom_order_start.elapsed();
-                info!("SparkMatcher::is_phantom_order executed in {:?}", is_phantom_order_duration);
+                // info!("SparkMatcher::is_phantom_order executed in {:?}", is_phantom_order_duration);
 
                 let amount = sell_size.abs().min(buy_size);
                 sell_order.base_size = (sell_size + amount).to_string();
@@ -269,7 +269,7 @@ impl SparkMatcher {
         }
 
         let duration = start.elapsed();
-        info!("SparkMatcher::is_phantom_order executed in {:?}", duration);
+        // info!("SparkMatcher::is_phantom_order executed in {:?}", duration);
 
         Ok(sell_is_phantom || buy_is_phantom)
     }
@@ -278,7 +278,7 @@ impl SparkMatcher {
         let start = Instant::now();
         let order = self.orderbook.order_by_id(id).await?;
         let duration = start.elapsed();
-        info!("SparkMatcher::is_order_phantom executed in {:?}", duration);
+        // info!("SparkMatcher::is_order_phantom executed in {:?}", duration);
         Ok(order.value.is_none())
     }
 
