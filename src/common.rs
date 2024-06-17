@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
+use log::{error, info};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
 use tokio::time::Instant;
-use log::{error, info};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum OrderType {
@@ -29,28 +29,52 @@ pub fn ev(key: &str) -> Result<String> {
 fn format_graphql_query(order_type: OrderType) -> String {
     let limit = ev("FETCH_ORDER_LIMIT").unwrap_or_else(|_| "100".to_string());
     let (order_type_str, order_by) = match order_type {
-        OrderType::Sell => ("sell", "asc"),
-        OrderType::Buy => ("buy", "desc"),
+        // OrderType::Sell => ("sell", "asc"),
+        // OrderType::Buy => ("buy", "desc"),    
+        OrderType::Sell => ("sell", "ASC"),
+        OrderType::Buy => ("buy", "DESC"),
     };
+
+    // let query = json!({
+    //     "query": format!(
+    //         r#"
+    //         query {{
+    //             SpotOrder(
+    //                 limit: {}, 
+    //                 where: {{order_type: {{_eq: "{}"}}, base_size: {{_neq: "0"}}}}, 
+    //                 order_by: {{base_price: {}}}
+    //             ) {{
+    //                     id
+    //                     trader
+    //                     timestamp
+    //                     order_type
+    //                     base_size
+    //                     base_token
+    //                     base_price
+    //             }}
+    //         }}"#,
+    //         limit, order_type_str, order_by
+    //     )
+    // });
 
     let query = json!({
         "query": format!(
             r#"
             query {{
-                SpotOrder(
-                    limit: {}, 
-                    where: {{order_type: {{_eq: "{}"}}, base_size: {{_neq: "0"}}}}, 
-                    order_by: {{base_price: {}}}
-                ) {{
-                        id
-                        trader
-                        timestamp
-                        order_type
-                        base_size
-                        base_token
-                        base_price
-                }}
-            }}"#,
+            spotOrders(
+                limit: {}, 
+                where: {{orderType_eq: {}, baseSize_not_eq: "0"}}, 
+                orderBy: basePrice_{}
+            ) {{
+                id
+                trader
+                timestamp
+                orderType
+                baseSize
+                baseToken
+                basePrice
+            }}
+        }}"#,
             limit, order_type_str, order_by
         )
     });
@@ -58,7 +82,10 @@ fn format_graphql_query(order_type: OrderType) -> String {
     query.to_string()
 }
 
-pub async fn fetch_orders_from_indexer(order_type: OrderType, client: &Client) -> Result<Vec<SpotOrder>> {
+pub async fn fetch_orders_from_indexer(
+    order_type: OrderType,
+    client: &Client,
+) -> Result<Vec<SpotOrder>> {
     let start = Instant::now();
     let graphql_query = format_graphql_query(order_type);
     let graphql_url = ev("INDEXER_URL").unwrap();
@@ -84,8 +111,16 @@ pub async fn fetch_orders_from_indexer(order_type: OrderType, client: &Client) -
     } else {
         let duration = start.elapsed();
         match order_type {
-            OrderType::Sell => error!("fetch_orders_from_indexer(Sell) failed in {:?} with status: {}", duration, response.status()),
-            OrderType::Buy => error!("fetch_orders_from_indexer(Buy) failed in {:?} with status: {}", duration, response.status()),
+            OrderType::Sell => error!(
+                "fetch_orders_from_indexer(Sell) failed in {:?} with status: {}",
+                duration,
+                response.status()
+            ),
+            OrderType::Buy => error!(
+                "fetch_orders_from_indexer(Buy) failed in {:?} with status: {}",
+                duration,
+                response.status()
+            ),
         }
         Err(anyhow::anyhow!(
             "Request failed with status: {}",
