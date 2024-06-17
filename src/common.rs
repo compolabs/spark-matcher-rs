@@ -28,34 +28,10 @@ pub fn ev(key: &str) -> Result<String> {
 
 fn format_graphql_query(order_type: OrderType) -> String {
     let limit = ev("FETCH_ORDER_LIMIT").unwrap_or_else(|_| "100".to_string());
-    let (order_type_str, order_by) = match order_type {
-        // OrderType::Sell => ("sell", "asc"),
-        // OrderType::Buy => ("buy", "desc"),    
+    let (order_type_str, order_by) = match order_type { 
         OrderType::Sell => ("sell", "ASC"),
         OrderType::Buy => ("buy", "DESC"),
     };
-
-    // let query = json!({
-    //     "query": format!(
-    //         r#"
-    //         query {{
-    //             SpotOrder(
-    //                 limit: {}, 
-    //                 where: {{order_type: {{_eq: "{}"}}, base_size: {{_neq: "0"}}}}, 
-    //                 order_by: {{base_price: {}}}
-    //             ) {{
-    //                     id
-    //                     trader
-    //                     timestamp
-    //                     order_type
-    //                     base_size
-    //                     base_token
-    //                     base_price
-    //             }}
-    //         }}"#,
-    //         limit, order_type_str, order_by
-    //     )
-    // });
 
     let query = json!({
         "query": format!(
