@@ -15,11 +15,11 @@ pub enum OrderType {
 pub struct SpotOrder {
     pub id: String,
     pub trader: String,
-    pub base_token: String,
-    pub base_size: String,
-    pub base_price: String,
+    pub baseToken: String,
+    pub baseSize: String,
+    pub basePrice: String,
     pub timestamp: String,
-    pub order_type: String,
+    pub orderType: String,
 }
 
 pub fn ev(key: &str) -> Result<String> {
@@ -28,7 +28,7 @@ pub fn ev(key: &str) -> Result<String> {
 
 fn format_graphql_query(order_type: OrderType) -> String {
     let limit = ev("FETCH_ORDER_LIMIT").unwrap_or_else(|_| "100".to_string());
-    let (order_type_str, order_by) = match order_type { 
+    let (order_type_str, order_by) = match order_type {
         OrderType::Sell => ("sell", "ASC"),
         OrderType::Buy => ("buy", "DESC"),
     };
@@ -69,14 +69,14 @@ pub async fn fetch_orders_from_indexer(
     let response = client
         .post(&graphql_url)
         .header("Content-Type", "application/json")
-        .body(graphql_query)
+        .body(graphql_query.to_string())
         .send()
         .await?;
 
     if response.status().is_success() {
         let json_response: serde_json::Value = response.json().await?;
         let orders: Vec<SpotOrder> =
-            serde_json::from_value(json_response["data"]["SpotOrder"].clone())
+            serde_json::from_value(json_response["data"]["spotOrders"].clone())
                 .context("Failed to parse orders from response")?;
         let duration = start.elapsed();
         match order_type {
