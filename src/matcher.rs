@@ -144,7 +144,7 @@ impl SparkMatcher {
         sell_orders: &mut Vec<SpotOrder>,
         buy_orders: &mut Vec<SpotOrder>,
     ) -> Result<Vec<(String, String)>> {
-        let start = Instant::now();
+        // let start = Instant::now();
         let mut match_pairs: Vec<(String, String)> = vec![];
         let mut sell_index = 0;
         let mut buy_index = 0;
@@ -189,7 +189,7 @@ impl SparkMatcher {
             if self.match_conditions_met(
                 sell_price, buy_price, sell_size, buy_size, sell_order, buy_order,
             ) {
-                let is_phantom_order_start = Instant::now();
+                // let is_phantom_order_start = Instant::now();
                 if self.is_phantom_order(sell_order, buy_order).await? {
                     sell_order.baseSize = "0".to_string();
                     buy_order.baseSize = "0".to_string();
@@ -222,8 +222,8 @@ impl SparkMatcher {
             }
         }
 
-        let duration = start.elapsed();
-        info!("SparkMatcher::find_matching_pairs executed in {:?}", duration);
+        // let duration = start.elapsed();
+        // info!("SparkMatcher::find_matching_pairs executed in {:?}", duration);
         Ok(match_pairs)
     }
 
@@ -249,7 +249,7 @@ impl SparkMatcher {
         sell_order: &SpotOrder,
         buy_order: &SpotOrder,
     ) -> Result<bool> {
-        let start = Instant::now();
+        // let start = Instant::now();
         let sell_id = Bits256::from_hex_str(&sell_order.id)?;
         let buy_id = Bits256::from_hex_str(&buy_order.id)?;
 
@@ -268,16 +268,16 @@ impl SparkMatcher {
             self.ignore_list.push(buy_order.id.clone())
         }
 
-        let duration = start.elapsed();
+        // let duration = start.elapsed();
         // info!("SparkMatcher::is_phantom_order executed in {:?}", duration);
 
         Ok(sell_is_phantom || buy_is_phantom)
     }
 
     async fn is_order_phantom(&self, id: &Bits256) -> Result<bool> {
-        let start = Instant::now();
+        // let start = Instant::now();
         let order = self.orderbook.order_by_id(id).await?;
-        let duration = start.elapsed();
+        // let duration = start.elapsed();
         // info!("SparkMatcher::is_order_phantom executed in {:?}", duration);
         Ok(order.value.is_none())
     }
