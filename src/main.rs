@@ -4,7 +4,6 @@ mod matcher;
 
 use ::log::info;
 use anyhow::Result;
-use orderbook::print_title;
 
 use dotenv::dotenv;
 use reqwest::Client;
@@ -13,7 +12,7 @@ use crate::matcher::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    print_title("Spark's Rust Matcher");
+    // print_title("Spark's Rust Matcher");
     dotenv().ok();
     log::setup_logging()?;
     info!("Matcher launched, running...");
