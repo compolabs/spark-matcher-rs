@@ -14,10 +14,10 @@ pub enum OrderType {
 #[derive(Debug, Deserialize)]
 pub struct SpotOrder {
     pub id: String,
-    pub trader: String,
-    pub base_token: String,
-    pub base_size: String,
-    pub base_price: String,
+    pub user: String,
+    pub asset: String,
+    pub amount: String,
+    pub price: String,
     pub timestamp: String,
     pub order_type: String,
 }
@@ -29,26 +29,26 @@ pub fn ev(key: &str) -> Result<String> {
 fn format_graphql_query(order_type: OrderType) -> String {
     let limit = ev("FETCH_ORDER_LIMIT").unwrap_or_else(|_| "100".to_string());
     let (order_type_str, order_by) = match order_type {
-        OrderType::Sell => ("sell", "asc"),
-        OrderType::Buy => ("buy", "desc"),
+        OrderType::Sell => ("Sell", "asc"),
+        OrderType::Buy => ("Buy", "desc"),
     };
 
     let query = json!({
         "query": format!(
             r#"
             query {{
-                SpotOrder(
+                Order(
                     limit: {}, 
-                    where: {{order_type: {{_eq: "{}"}}, base_size: {{_neq: "0"}}}}, 
-                    order_by: {{base_price: {}}}
+                    where: {{order_type: {{_eq: "{}"}}, amount: {{_neq: "0"}}}}, 
+                    order_by: {{price: {}}}
                 ) {{
                         id
-                        trader
+                        user
                         timestamp
                         order_type
-                        base_size
-                        base_token
-                        base_price
+                        amount
+                        asset
+                        price
                 }}
             }}"#,
             limit, order_type_str, order_by

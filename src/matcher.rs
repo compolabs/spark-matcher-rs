@@ -5,7 +5,7 @@ use fuels::{
     prelude::{Provider, WalletUnlocked},
     types::Bits256,
 };
-use orderbook::{constants::RPC, orderbook_utils::Orderbook};
+// use orderbook::{constants::RPC, orderbook_utils::Orderbook};
 use reqwest::Client;
 use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
@@ -155,19 +155,19 @@ impl SparkMatcher {
 
             let (sell_size, sell_price, buy_size, buy_price) = (
                 sell_order
-                    .base_size
+                    .amount
                     .parse::<i128>()
                     .context("Invalid sell order size")?,
                 sell_order
-                    .base_price
+                    .price
                     .parse::<i128>()
                     .context("Invalid sell order price")?,
                 buy_order
-                    .base_size
+                    .amount
                     .parse::<i128>()
                     .context("Invalid buy order size")?,
                 buy_order
-                    .base_price
+                    .price
                     .parse::<i128>()
                     .context("Invalid buy order price")?,
             );
@@ -191,8 +191,8 @@ impl SparkMatcher {
             ) {
                 let is_phantom_order_start = Instant::now();
                 if self.is_phantom_order(sell_order, buy_order).await? {
-                    sell_order.base_size = "0".to_string();
-                    buy_order.base_size = "0".to_string();
+                    sell_order.amount = "0".to_string();
+                    buy_order.amount = "0".to_string();
                     let is_phantom_order_duration = is_phantom_order_start.elapsed();
                     // info!("SparkMatcher::is_phantom_order executed in {:?}", is_phantom_order_duration);
                     continue;
@@ -201,16 +201,16 @@ impl SparkMatcher {
                 // info!("SparkMatcher::is_phantom_order executed in {:?}", is_phantom_order_duration);
 
                 let amount = sell_size.abs().min(buy_size);
-                sell_order.base_size = (sell_size + amount).to_string();
-                buy_order.base_size = (buy_size - amount).to_string();
+                sell_order.amount = (sell_size + amount).to_string();
+                buy_order.amount = (buy_size - amount).to_string();
 
                 match_pairs.push((sell_order.id.clone(), buy_order.id.clone()));
 
-                if sell_order.base_size == "0" {
+                if sell_order.amount == "0" {
                     sell_index += 1;
                 }
 
-                if buy_order.base_size == "0" {
+                if buy_order.amount == "0" {
                     buy_index += 1;
                 }
             } else {
@@ -238,7 +238,7 @@ impl SparkMatcher {
     ) -> bool {
         !self.ignore_list.contains(&sell_order.id)
             && !self.ignore_list.contains(&buy_order.id)
-            && sell_order.base_token == buy_order.base_token
+            && sell_order.asset == buy_order.asset
             && sell_size < 0
             && buy_size > 0
             && sell_price <= buy_price
