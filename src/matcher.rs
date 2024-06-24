@@ -314,7 +314,7 @@ impl SparkMatcher {
         match self.market.methods().match_order_many(pairs).call().await {
             Ok(res) => {
                 info!(
-                    "✅✅✅ Matched {} pairs\nhttps://app.fuel.network/tx/0x{}/simple!\n",
+                    "✅✅✅ Matched {} pairs\nhttps://app.fuel.network/tx/0x{}/simple\n",
                     match_pairs.len(),
                     // gas_price_res.gas_price as f64 * res.gas_used as f64 / 1e9f64, //todo
                     res.tx_id.unwrap().to_string()
