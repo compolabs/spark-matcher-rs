@@ -104,6 +104,7 @@ impl SparkMatcher {
 
             self.ignore_list.clear();
             self.status = Status::Chill;
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
     }
 
@@ -129,13 +130,13 @@ impl SparkMatcher {
 
         if !match_pairs.is_empty() {
             // let match_pairs_exec_start = Instant::now();
-            // if let Err(_e) = self.match_pairs(match_pairs.clone()).await {
-            for pair in match_pairs {
-                if let Err(e) = self.match_single_pair(pair).await {
-                    error!("Failed to match single pair: {}", e);
+            if let Err(_e) = self.match_pairs(match_pairs.clone()).await {
+                for pair in match_pairs {
+                    if let Err(e) = self.match_single_pair(pair).await {
+                        error!("Failed to match single pair: {}", e);
+                    }
                 }
             }
-            // }
             // let match_pairs_exec_duration = match_pairs_exec_start.elapsed();
             // info!(
             //     "SparkMatcher::match_pairs executed in {:?}",
@@ -293,47 +294,51 @@ impl SparkMatcher {
         Ok(order.value.is_none())
     }
 
-    // async fn match_pairs(&self, match_pairs: Vec<(String, String)>) -> Result<()> {
-    //     if match_pairs.is_empty() {
-    //         return Ok(());
-    //     }
+    async fn match_pairs(&self, match_pairs: Vec<(String, String)>) -> Result<()> {
+        if match_pairs.is_empty() {
+            return Ok(());
+        }
 
-    //     let start = Instant::now();
-    //     let pairs: Vec<_> = match_pairs
-    //         .iter()
-    //         .map(|(s, b)| {
-    //             (
-    //                 Bits256::from_hex_str(s).unwrap(),
-    //                 Bits256::from_hex_str(b).unwrap(),
-    //             )
-    //         })
-    //         .collect();
+        let start = Instant::now();
+        let pairs: Vec<_> = match_pairs
+            .clone()
+            .into_iter()
+            .flat_map(|(s1, s2)| {
+                vec![
+                    Bits256::from_hex_str(&s1).unwrap(),
+                    Bits256::from_hex_str(&s2).unwrap(),
+                ]
+            })
+            .collect();
 
-    //     match self.orderbook.match_in_pairs(pairs).await {
-    //         Ok(_) => {
-    //             info!(
-    //                 "✅✅✅ Matched these pairs (sell, buy): => `{:#?}`!\n",
-    //                 &match_pairs
-    //             );
-    //         }
-    //         Err(e) => {
-    //             error!("matching error `{}`", e);
-    //             error!(
-    //                 "Tried to match these pairs, but failed: (sell, buy) => `{:#?}`.",
-    //                 &match_pairs
-    //             );
-    //             return Err(e.into());
-    //         }
-    //     }
-    //     let duration = start.elapsed();
-    //     info!("SparkMatcher::match_pairs executed in {:?}", duration);
-    //     Ok(())
-    // }
+        match self.market.methods().match_order_many(pairs).call().await {
+            Ok(res) => {
+                info!(
+                    "✅✅✅ Matched {} pairs\nhttps://app.fuel.network/tx/0x{}/simple!\n",
+                    match_pairs.len(),
+                    // gas_price_res.gas_price as f64 * res.gas_used as f64 / 1e9f64, //todo
+                    res.tx_id.unwrap().to_string()
+                );
+            }
+            Err(e) => {
+                error!("matching error `{}`", e);
+                error!(
+                    "Tried to match these pairs, but failed: (sell, buy) => `{:#?}`.",
+                    &match_pairs
+                );
+                return Err(e.into());
+            }
+        }
+        let duration = start.elapsed();
+        info!("SparkMatcher::match_pairs executed in {:?}", duration);
+        Ok(())
+    }
 
     async fn match_single_pair(&self, pair: (String, String)) -> Result<()> {
         let start = Instant::now();
         let (sell, buy) = pair;
-        self.market
+        let res = self
+            .market
             .methods()
             .match_order_pair(
                 Bits256::from_hex_str(&sell).unwrap(),
@@ -341,9 +346,13 @@ impl SparkMatcher {
             )
             .call()
             .await?;
+
         info!(
-            "✅ Matched single pair (sell, buy): => `({}, {})`\n",
-            sell, buy
+            "✅ Matched single pair (sell, buy): => `({}, {})`\ntx id: {}\n",
+            sell,
+            buy,
+            // res.gas_used as f64 * gas_price_res.gas_price as f64 / 1e9f64,//todo
+            res.tx_id.unwrap().to_string()
         );
         let duration = start.elapsed();
         info!("SparkMatcher::match_single_pair executed in {:?}", duration);
