@@ -2,7 +2,6 @@ mod common;
 mod log;
 mod matcher;
 
-use ::log::info;
 use anyhow::Result;
 
 use dotenv::dotenv;
@@ -15,7 +14,6 @@ async fn main() -> Result<()> {
     // print_title("Spark's Rust Matcher");
     dotenv().ok();
     log::setup_logging()?;
-    info!("Matcher launched, running...");
 
     let client = Client::new();
     let matcher = SparkMatcher::init(client).await?;
