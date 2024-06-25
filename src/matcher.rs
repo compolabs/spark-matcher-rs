@@ -93,7 +93,7 @@ impl SparkMatcher {
 
             self.ignore_list.clear();
             self.status = Status::Chill;
-            tokio::time::sleep(Duration::from_millis(1500)).await;
+            tokio::time::sleep(Duration::from_millis(1000)).await;
         }
     }
 
@@ -103,8 +103,8 @@ impl SparkMatcher {
             fetch_orders_from_indexer(crate::common::OrderType::Buy, &self.client)
         );
 
-        let mut sell_orders = sell_orders_result.unwrap(); //.context("Failed to fetch sell orders")?;
-        let mut buy_orders = buy_orders_result.unwrap(); //.context("Failed to fetch buy orders")?;
+        let mut sell_orders = sell_orders_result.context("Failed to fetch sell orders")?;
+        let mut buy_orders = buy_orders_result.context("Failed to fetch buy orders")?;
 
         let match_pairs = self
             .find_matching_pairs(&mut sell_orders, &mut buy_orders)
