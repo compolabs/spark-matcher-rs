@@ -2,21 +2,16 @@ use ::log::{debug, error, info};
 use anyhow::{Context, Result};
 use fuels::{
     crypto::SecretKey,
-    macros::abigen,
     prelude::{Provider, WalletUnlocked},
-    types::{bech32::Bech32ContractId, Bits256, ContractId},
+    types::{Bits256, ContractId},
 };
 use reqwest::Client;
+use spark_market_sdk::MarketContract;
 use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use crate::common::*;
-
-abigen!(Contract(
-    name = "Market",
-    abi = "market-contract/out/release/market-contract-abi.json"
-));
 
 #[derive(Eq, PartialEq)]
 pub enum Status {
@@ -25,7 +20,7 @@ pub enum Status {
 }
 
 pub struct SparkMatcher {
-    market: Market<WalletUnlocked>,
+    market: MarketContract,
     initialized: bool,
     status: Status,
     ignore_list: Vec<String>,
@@ -45,10 +40,7 @@ impl SparkMatcher {
         debug!("Setup SparkMatcher correctly.");
 
         Ok(Self {
-            market: Market::new(
-                Bech32ContractId::from(ContractId::from_str(&contract_id).unwrap()),
-                wallet,
-            ),
+            market: MarketContract::new(ContractId::from_str(&contract_id).unwrap(), wallet).await,
             initialized: true,
             status: Status::Chill,
             ignore_list: vec![],
@@ -124,13 +116,7 @@ impl SparkMatcher {
 
         let order_pairs = create_order_pairs(buy_orders, sell_orders);
         let order_pairs_len = order_pairs.len();
-        match self
-            .market
-            .methods()
-            .match_order_many(order_pairs)
-            .call()
-            .await
-        {
+        match self.market.match_order_many(order_pairs).await {
             Ok(res) => {
                 info!(
                     "✅✅✅ Matched {} orders\nhttps://app.fuel.network/tx/0x{}/simple",

@@ -10,8 +10,7 @@ license = "Apache-2.0"
 fuels = { version = "0.64", features = ["fuel-core-lib"] }
 rand = "0.8.5"
 tokio = { version = "1.12", features = ["rt", "macros"] }
-# orderbook = { git = "https://github.com/compolabs/orderbook-contract.git", branch = "testnet" }
-# orderbook = { git = "https://github.com/compolabs/orderbook-contract.git", branch = "feat-contract-split", subdir = "spark-market-sdk" }
+spark-market-sdk = { git = "https://github.com/compolabs/orderbook-contract.git", branch = "feat-contract-split", package = "spark-market-sdk" }
 
 dotenv = "0.15.0"
 hex = "0.4"
