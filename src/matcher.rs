@@ -112,11 +112,11 @@ impl SparkMatcher {
 
         let start = Instant::now();
 
-        filter_orders(&mut buy_orders, &mut sell_orders);
+        // filter_orders(&mut buy_orders, &mut sell_orders);
 
-        if sell_orders.is_empty() || buy_orders.is_empty() {
-            return Ok(());
-        }
+        // if sell_orders.is_empty() || buy_orders.is_empty() {
+        //     return Ok(());
+        // }
         let order_pairs = create_order_pairs(buy_orders, sell_orders);
         let order_pairs_len = order_pairs.len();
 
@@ -181,10 +181,10 @@ fn create_order_pairs(buy_orders: Vec<SpotOrder>, sell_orders: Vec<SpotOrder>) -
     let mut sell_iter = sell_orders.into_iter();
 
     while let (Some(buy_order), Some(sell_order)) = (buy_iter.next(), sell_iter.next()) {
-        if buy_order.price >= sell_order.price {
-            pairs.push(Bits256::from_hex_str(buy_order.id.as_str()).unwrap());
-            pairs.push(Bits256::from_hex_str(sell_order.id.as_str()).unwrap());
-        }
+        // if buy_order.price >= sell_order.price {
+        pairs.push(Bits256::from_hex_str(buy_order.id.as_str()).unwrap());
+        pairs.push(Bits256::from_hex_str(sell_order.id.as_str()).unwrap());
+        // }
     }
 
     pairs
