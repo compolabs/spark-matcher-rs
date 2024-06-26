@@ -54,7 +54,7 @@ impl SparkMatcher {
     }
 
     pub async fn run(&mut self) {
-        info!("Matcher launched, running...");
+        info!("Matcher launched, running...\n");
         self.process_next().await;
     }
 
@@ -96,7 +96,7 @@ impl SparkMatcher {
         let buy_orders = buy_orders_result.context("Failed to fetch buy orders")?;
 
         if let Err(_e) = self.match_many(sell_orders, buy_orders).await {
-            error!("Failed to match single pair: {}", _e);
+            error!("Failed to match : {}\n", _e);
         }
         Ok(())
     }
@@ -119,13 +119,13 @@ impl SparkMatcher {
         match self.market.match_order_many(order_pairs).await {
             Ok(res) => {
                 info!(
-                    "✅✅✅ Matched {} orders\nhttps://app.fuel.network/tx/0x{}/simple",
+                    "✅✅✅ Matched {} orders\nhttps://app.fuel.network/tx/0x{}/simple\n",
                     order_pairs_len,
                     res.tx_id.unwrap().to_string(),
                 );
             }
             Err(e) => {
-                error!("matching error `{}`", e);
+                error!("matching error `{}`\n", e);
                 error!(
                     "Tried to match {} orders, but failed: (sell, buy).",
                     order_pairs_len,
