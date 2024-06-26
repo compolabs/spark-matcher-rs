@@ -40,7 +40,7 @@ fn format_graphql_query(order_type: OrderType) -> String {
                 Order(
                     limit: {}, 
                     where: {{ status: {{_eq: "Active"}}, order_type: {{_eq: "{}"}} }}, 
-                    order_by: {{price: {}}}
+                    order_by: {{price: {}}},
                 ) {{
                         id
                         user

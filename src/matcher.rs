@@ -114,8 +114,12 @@ impl SparkMatcher {
 
         filter_orders(&mut buy_orders, &mut sell_orders);
 
+        if sell_orders.is_empty() || buy_orders.is_empty() {
+            return Ok(());
+        }
         let order_pairs = create_order_pairs(buy_orders, sell_orders);
         let order_pairs_len = order_pairs.len();
+
         match self.market.match_order_many(order_pairs).await {
             Ok(res) => {
                 info!(
