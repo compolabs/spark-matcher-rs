@@ -112,19 +112,54 @@ impl SparkMatcher {
 
         let start = Instant::now();
 
-        // filter_orders(&mut buy_orders, &mut sell_orders);
+        let mut matches: Vec<String> = Vec::new();
 
-        // if sell_orders.is_empty() || buy_orders.is_empty() {
-        //     return Ok(());
-        // }
-        let order_pairs = create_order_pairs(buy_orders, sell_orders);
-        let order_pairs_len = order_pairs.len();
+        let mut buy_index = 0;
+        let mut sell_index = 0;
 
-        match self.market.match_order_many(order_pairs).await {
+        while buy_index < buy_orders.len() && sell_index < sell_orders.len() {
+            let buy_order = &mut buy_orders[buy_index];
+            let sell_order = &mut sell_orders[sell_index];
+
+            let buy_order_amount = buy_order.amount.parse::<u128>().unwrap();
+            let sell_order_amount = sell_order.amount.parse::<u128>().unwrap();
+            if buy_order.price >= sell_order.price {
+                let match_amount = std::cmp::min(buy_order_amount, sell_order_amount);
+
+                if !matches.contains(&buy_order.id) {
+                    matches.push(buy_order.id.clone());
+                }
+                if !matches.contains(&sell_order.id) {
+                    matches.push(sell_order.id.clone());
+                }
+                buy_order.amount = (buy_order_amount - match_amount).to_string();
+                sell_order.amount = (sell_order_amount - match_amount).to_string();
+
+                if buy_order.amount == "0" {
+                    buy_index += 1;
+                }
+
+                if sell_order.amount == "0" {
+                    sell_index += 1;
+                }
+            } else {
+                sell_index += 1;
+            }
+        }
+
+        let matches_len = matches.len();
+        if matches_len == 0{
+            return Ok(());
+        }
+        let matches = matches
+            .into_iter()
+            .map(|id| Bits256::from_hex_str(&id).unwrap())
+            .collect();
+        match self.market.match_order_many(matches).await {
             Ok(res) => {
                 info!(
                     "✅✅✅ Matched {} orders\nhttps://app.fuel.network/tx/0x{}/simple\n",
-                    order_pairs_len,
+                    matches_len,
                     res.tx_id.unwrap().to_string(),
                 );
             }
@@ -132,7 +167,7 @@ impl SparkMatcher {
                 error!("matching error `{}`\n", e);
                 error!(
                     "Tried to match {} orders, but failed: (sell, buy).",
-                    order_pairs_len,
+                    matches_len,
                 );
                 return Err(e.into());
             }
@@ -141,51 +176,4 @@ impl SparkMatcher {
         info!("SparkMatcher::match_pairs executed in {:?}", duration);
         Ok(())
     }
-}
-
-fn filter_orders(buy_orders: &mut Vec<SpotOrder>, sell_orders: &mut Vec<SpotOrder>) {
-    let mut i = 0;
-    let mut j = 0;
-
-    while i < buy_orders.len() && j < sell_orders.len() {
-        if buy_orders[i].price >= sell_orders[j].price {
-            // Match found, move to the next order in both lists
-            i += 1;
-            j += 1;
-        } else {
-            if buy_orders[i].price < sell_orders[j].price {
-                // Buy order cannot match, remove it
-                buy_orders.remove(i);
-            } else {
-                // Sell order cannot match, remove it
-                sell_orders.remove(j);
-            }
-        }
-    }
-
-    // Remove remaining unmatched sell orders
-    while j < sell_orders.len() {
-        sell_orders.remove(j);
-    }
-
-    // Remove remaining unmatched buy orders
-    while i < buy_orders.len() {
-        buy_orders.remove(i);
-    }
-}
-
-fn create_order_pairs(buy_orders: Vec<SpotOrder>, sell_orders: Vec<SpotOrder>) -> Vec<Bits256> {
-    let mut pairs = Vec::new();
-
-    let mut buy_iter = buy_orders.into_iter();
-    let mut sell_iter = sell_orders.into_iter();
-
-    while let (Some(buy_order), Some(sell_order)) = (buy_iter.next(), sell_iter.next()) {
-        // if buy_order.price >= sell_order.price {
-        pairs.push(Bits256::from_hex_str(buy_order.id.as_str()).unwrap());
-        pairs.push(Bits256::from_hex_str(sell_order.id.as_str()).unwrap());
-        // }
-    }
-
-    pairs
 }
