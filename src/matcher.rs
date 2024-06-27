@@ -121,10 +121,10 @@ impl SparkMatcher {
             let buy_order = &mut buy_orders[buy_index];
             let sell_order = &mut sell_orders[sell_index];
 
-            let buy_order_amount = buy_order.amount.parse::<u128>().unwrap();
-            let sell_order_amount = sell_order.amount.parse::<u128>().unwrap();
             if buy_order.price.parse::<u128>().unwrap() >= sell_order.price.parse::<u128>().unwrap()
             {
+                let buy_order_amount = buy_order.amount.parse::<u128>().unwrap();
+                let sell_order_amount = sell_order.amount.parse::<u128>().unwrap();
                 let match_amount = std::cmp::min(buy_order_amount, sell_order_amount);
 
                 if !matches.contains(&buy_order.id) {
