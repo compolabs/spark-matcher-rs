@@ -123,7 +123,8 @@ impl SparkMatcher {
 
             let buy_order_amount = buy_order.amount.parse::<u128>().unwrap();
             let sell_order_amount = sell_order.amount.parse::<u128>().unwrap();
-            if buy_order.price >= sell_order.price {
+            if buy_order.price.parse::<u128>().unwrap() >= sell_order.price.parse::<u128>().unwrap()
+            {
                 let match_amount = std::cmp::min(buy_order_amount, sell_order_amount);
 
                 if !matches.contains(&buy_order.id) {
@@ -148,7 +149,7 @@ impl SparkMatcher {
         }
 
         let matches_len = matches.len();
-        if matches_len == 0{
+        if matches_len == 0 {
             return Ok(());
         }
         let matches = matches
