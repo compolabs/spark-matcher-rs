@@ -11,7 +11,7 @@ fuels = { version = "0.64", features = ["fuel-core-lib"] }
 rand = "0.8.5"
 tokio = { version = "1.12", features = ["rt", "macros"] }
 spark-market-sdk = { git = "https://github.com/compolabs/orderbook-contract.git", branch = "feat-contract-split", package = "spark-market-sdk" }
-
+tokio-tungstenite = "0.23.1"
 dotenv = "0.15.0"
 hex = "0.4"
 anyhow = "1.0.82"
@@ -22,6 +22,7 @@ log = "0.4.21"
 fern = "0.6.2"
 chrono = "0.4.38"
 itertools = "0.13.0"
+futures-util = "0.3"
 
 [[bin]]
 name = "spark-matcher"
