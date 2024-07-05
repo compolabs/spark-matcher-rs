@@ -23,7 +23,6 @@ pub struct SparkMatcher {
     market: MarketContract,
     initialized: bool,
     status: Status,
-    ignore_list: Vec<String>,
     client: Client,
 }
 
@@ -43,7 +42,6 @@ impl SparkMatcher {
             market: MarketContract::new(ContractId::from_str(&contract_id).unwrap(), wallet).await,
             initialized: true,
             status: Status::Chill,
-            ignore_list: vec![],
             client,
         })
     }
@@ -80,7 +78,6 @@ impl SparkMatcher {
                 }
             }
 
-            self.ignore_list.clear();
             self.status = Status::Chill;
             tokio::time::sleep(Duration::from_millis(1000)).await;
         }
