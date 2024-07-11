@@ -1,28 +1,28 @@
-# Use the official Rust image for the build stage
-FROM rust:1.77 as builder
-WORKDIR /usr/src/spark-matcher-rs
-
-# Copy the source code into the container
+FROM rust:1.60 as builder
+WORKDIR /usr/src/matcher
 COPY . .
+RUN apt-get update && apt-get install -y openssl libssl-dev cmake pkg-config
 
-# Build the application
 RUN cargo build --release
+FROM debian:buster-slim
 
-# Use Debian slim for the runtime stage
-FROM ubuntu:22.04
+RUN apt-get update && apt-get install -y openssl libssl1.1 && rm -rf /var/lib/apt/lists/*
 
-# Avoid prompts from apt
-ENV DEBIAN_FRONTEND=noninteractive
-WORKDIR /root/
+COPY --from=builder /usr/src/matcher/target/release/matcher /usr/local/bin/matcher
 
-# Copy the built executable and any other necessary files
-COPY --from=builder /usr/src/spark-matcher-rs/target/release/spark-matcher .
+ENV NODE_ENV=development \
+    PORT=5003 \
+    CONTRACT_ID="lalala" \
+    INDEXER_URL="http://13.49.144.58:8080/v1/graphql" \
+    WEBSOCKET_URL="ws://localhost:8080/v1/graphql" \
+    FETCH_ORDER_LIMIT=14 \
+    MARKET="BTC" \
+    LOG_FILE="matcher.log" \
+    FILE_LOG_LEVEL="debug" \
+    CONSOLE_LOG_LEVEL="info" \
+    MAX_FAIL_COUNT=3 \
+    PRIVATE_KEY="lalala2"
 
-# Install any runtime dependencies
-RUN apt-get update && apt-get install -y libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
-
-# Expose the port the server listens on
 EXPOSE 5003
 
-# Command to run the executable
-CMD ["./spark-matcher"]
+CMD ["matcher"]

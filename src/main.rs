@@ -1,25 +1,22 @@
 mod common;
-mod log;
 mod matcher;
-
-use anyhow::Result;
+mod log;
 
 use dotenv::dotenv;
-use reqwest::Client;
+use anyhow::Result;
 
-use crate::matcher::*;
+use crate::matcher::SparkMatcher;
+use url::Url;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // print_title("Spark's Rust Matcher");
     dotenv().ok();
-    log::setup_logging()?;
+    log::setup_logging()?; 
+    let ws_url = Url::parse(&common::ev("WEBSOCKET_URL")?)?;
 
-    let client = Client::new();
-    let matcher = SparkMatcher::init(client).await?;
-    let matcher_clone = matcher.clone();
-    let mut locked_matcher = matcher_clone.lock().await;
-    locked_matcher.run().await;
+    let matcher = SparkMatcher::new(ws_url).await?;
+    let mut matcher_lock = matcher.lock().await;
+    matcher_lock.run().await;
 
     Ok(())
 }
