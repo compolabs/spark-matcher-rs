@@ -66,7 +66,6 @@ impl SparkMatcher {
         while let Some(message) = client.next().await {
             match message {
                 Ok(Message::Text(text)) => {
-                    println!("Received message: {}", text);
                     if text.contains("connection_ack") && !initialized {
                         println!("Connection established, subscribing to orders...");
                         self.subscribe_to_orders(OrderType::Buy, &mut client).await;
@@ -195,15 +194,19 @@ async fn post_matched_orders(matches: &[(String, String, u128)], market: &Market
         println!("No orders to post.");
         return Ok(());
     }
+    let ids_len = &ids.len();
+    println!("Attempting to post {} matched orders to the blockchain.", &ids_len); 
 
     match market.match_order_many(ids).await {
         Ok(result) => {
-            println!("Successfully matched orders. Transaction ID: {:?}", result.tx_id);
+            println!("Successfully matched orders. Transaction ID: https://app.fuel.network/tx/0x{}/simple", result.tx_id.unwrap());
+            println!("Total matched orders posted: {}", ids_len);
             Ok(())
         },
         Err(e) => {
             println!("Failed to match orders on the blockchain: {:?}", e);
-            Err(e.into()) 
+            println!("Transaction reverted. Continuing with next batch of orders.");
+            Ok(()) 
         }
     }
 }
