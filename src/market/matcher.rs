@@ -20,7 +20,6 @@ use url::Url;
 #[derive(Debug, Eq, PartialEq)]
 pub enum Status {
     Chill,
-    Active,
 }
 
 pub struct MatcherState {
@@ -31,9 +30,7 @@ pub struct MatcherState {
 
 pub struct SparkMatcher {
     state: Arc<Mutex<MatcherState>>,
-    ws_url: Url,
     client: Arc<Mutex<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>>,
-    status: Status,
 }
 
 impl SparkMatcher {
@@ -56,9 +53,7 @@ impl SparkMatcher {
 
         Ok(Arc::new(Mutex::new(Self {
             state: Arc::new(Mutex::new(state)),
-            ws_url,
             client: Arc::new(Mutex::new(socket)),
-            status: Status::Chill,
         })))
     }
 
