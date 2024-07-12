@@ -1,9 +1,8 @@
 [package]
 name = "spark-matcher"
-description = "A Rust version of the spark-matcher project."
+description = "small matcher on rust"
 version = "0.1.0"
 edition = "2021"
-authors = ["Oleksii Kshenskyi <oleksii.kshenskyi@uatechpeople.com>"]
 license = "Apache-2.0"
 
 [dependencies]
