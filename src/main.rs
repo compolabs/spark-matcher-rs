@@ -1,26 +1,24 @@
-mod common;
-mod log;
-mod matcher;
+mod api;
+mod config;
+mod market;
+mod model;
+mod util;
 
-use ::log::info;
+use crate::market::SparkMatcher;
 use anyhow::Result;
-use orderbook::print_title;
-
 use dotenv::dotenv;
-
-use crate::matcher::*;
+use url::Url;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    print_title("Spark's Rust Matcher");
     dotenv().ok();
-    log::setup_logging()?;
-    info!("Matcher launched, running...");
+    util::logging::setup_logging()?;
 
-    let matcher = SparkMatcher::init().await?;
-    let matcher_clone = matcher.clone();
-    let mut locked_matcher = matcher_clone.lock().await;
-    locked_matcher.run().await;
+    let ws_url = Url::parse(&config::ev("WEBSOCKET_URL")?)?; // Получение URL WebSocket из переменных окружения
+
+    let matcher = SparkMatcher::new(ws_url).await?; // Создание и инициализация матчера
+    let mut matcher_lock = matcher.lock().await;
+    matcher_lock.run().await; // Запуск основной логики матчера
 
     Ok(())
 }
