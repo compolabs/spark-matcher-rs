@@ -6,25 +6,18 @@ mod util;
 mod web;
 
 use crate::market::SparkMatcher;
-use anyhow::Result;
-use dotenv::dotenv;
+use anyhow::{Result, Context};
 use url::Url;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenv().ok();
+    dotenv::dotenv().ok();
     util::logging::setup_logging()?;
 
-    let ws_url = Url::parse(&config::ev("WEBSOCKET_URL")?)?;
-
-    let matcher = SparkMatcher::new(ws_url).await?;
-    let mut matcher_lock = matcher.lock().await;
-
-    let _rocket = tokio::spawn(async {
-        web::server::rocket().launch().await
-    });
-
-    matcher_lock.run().await;
+    let ws_url = Url::parse(&config::ev("WEBSOCKET_URL").context("Failed to parse WEBSOCKET_URL")?)?;
+    let matcher = SparkMatcher::new(ws_url).await.context("Failed to create SparkMatcher")?;
+    let rocket = web::server::rocket(matcher);
+    rocket.launch().await.context("Rocket failed to launch")?;
 
     Ok(())
 }

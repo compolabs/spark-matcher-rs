@@ -23,32 +23,54 @@ pub enum Status {
 }
 
 pub struct MatcherState {
-    buy_orders: Vec<SpotOrder>,
-    sell_orders: Vec<SpotOrder>,
-    market: MarketContract,
+    pub buy_orders: Vec<SpotOrder>,
+    pub sell_orders: Vec<SpotOrder>,
+    pub market: MarketContract,
+    pub active: bool
+}
+
+impl MatcherState {
+    pub fn activate(&mut self) {
+        self.active = true;
+    }
+
+    pub fn deactivate(&mut self) {
+        self.active = false;
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
 }
 
 pub struct SparkMatcher {
-    state: Arc<Mutex<MatcherState>>,
-    client: Arc<Mutex<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>>,
+    pub state: Arc<Mutex<MatcherState>>,
+    pub client: Arc<Mutex<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>>,
 }
 
 impl SparkMatcher {
     pub async fn new(ws_url: Url) -> Result<Arc<Mutex<Self>>> {
+        println!("Attempting to connect to WebSocket at: {}", ws_url);
         let (socket, _) = connect_async(&ws_url).await.context("Failed to connect to WebSocket")?;
+        println!("WebSocket connection established.");
         let provider = Provider::connect("testnet.fuel.network").await?;
+        println!("Blockchain provider connected.");
         let private_key = ev("PRIVATE_KEY")?;
         let contract_id = ev("CONTRACT_ID")?;
         let wallet = WalletUnlocked::new_from_private_key(
             SecretKey::from_str(&private_key)?,
             Some(provider.clone()),
         );
+        println!("Wallet created and connected to contract.");
+
         let market = MarketContract::new(ContractId::from_str(&contract_id).unwrap(), wallet).await;
+        println!("Market contract initialized.");
 
         let state = MatcherState {
             buy_orders: Vec::new(),
             sell_orders: Vec::new(),
             market,
+            active: true,
         };
 
         Ok(Arc::new(Mutex::new(Self {
@@ -64,23 +86,25 @@ impl SparkMatcher {
 
         let mut initialized = false;
         while let Some(message) = client.next().await {
-            match message {
-                Ok(Message::Text(text)) => {
-                    if text.contains("connection_ack") && !initialized {
-                        println!("Connection established, subscribing to orders...");
-                        self.subscribe_to_orders(OrderType::Buy, &mut client).await;
-                        self.subscribe_to_orders(OrderType::Sell, &mut client).await;
-                        initialized = true;
-                    } else if text.contains("ka") {
-                        println!("Keep-alive message received.");
-                    } else {
-                        self.process_message(&text).await;
+            if self.state.lock().await.active {
+                match message {
+                    Ok(Message::Text(text)) => {
+                        if text.contains("connection_ack") && !initialized {
+                            println!("Connection established, subscribing to orders...");
+                            self.subscribe_to_orders(OrderType::Buy, &mut client).await;
+                            self.subscribe_to_orders(OrderType::Sell, &mut client).await;
+                            initialized = true;
+                        } else if text.contains("ka") {
+                            println!("Keep-alive message received.");
+                        } else {
+                            self.process_message(&text).await;
+                        }
+                    },
+                    Ok(_) => {},
+                    Err(e) => {
+                        eprintln!("Error during receive: {:?}", e);
+                        break;
                     }
-                },
-                Ok(_) => {},
-                Err(e) => {
-                    eprintln!("Error during receive: {:?}", e);
-                    break;
                 }
             }
         }
@@ -209,5 +233,6 @@ async fn post_matched_orders(matches: &[(String, String, u128)], market: &Market
             Ok(()) 
         }
     }
+
 }
 
