@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use futures_util::lock::Mutex;
 use rocket::{self, get, Route, State};
 use rocket::serde::json::Json;
 use rocket_okapi::{openapi, openapi_get_routes, JsonSchema};
-use rocket_okapi::swagger_ui::{make_swagger_ui, SwaggerUIConfig};
+use rocket_okapi::swagger_ui::SwaggerUIConfig;
 use serde::Serialize;
 use rocket_okapi::settings::UrlObject;
+use tokio::sync::Mutex;
 
 use crate::market::SparkMatcher;
 
@@ -53,19 +53,13 @@ pub async fn debug_matcher_state(matcher: &State<Arc<Mutex<SparkMatcher>>>) -> S
     format!("Matcher is active: {}", is_active)
 }
 
-#[openapi]
-#[get("/test")]
-pub async fn test_matcher(matcher: &State<Arc<Mutex<SparkMatcher>>>) -> String {
-    "Matcher is configured".to_string()
-}
 
 pub fn get_routes() -> Vec<Route> {
     openapi_get_routes![
-        //test_matcher
-//        start_matcher, 
-//        stop_matcher,
-//        status_matcher,
-//        debug_matcher_state
+        start_matcher, 
+        stop_matcher,
+        status_matcher,
+        debug_matcher_state
     ]
 }
 
