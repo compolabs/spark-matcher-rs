@@ -4,6 +4,7 @@ mod market;
 mod model;
 mod util;
 mod web;
+mod error;
 
 use crate::market::SparkMatcher;
 use anyhow::{Result, Context};

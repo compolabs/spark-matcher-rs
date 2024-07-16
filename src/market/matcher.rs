@@ -1,7 +1,7 @@
 use crate::config::ev;
+use crate::error::Error;
 use crate::model::{OrderType, SpotOrder};
 use crate::api::subscription::format_graphql_subscription;
-use anyhow::{Context, Result};
 use fuels::types::Bits256;
 use fuels::{
     accounts::provider::Provider,
@@ -49,16 +49,23 @@ pub struct SparkMatcher {
 }
 
 impl SparkMatcher {
-    pub async fn new(ws_url: Url) -> Result<Arc<Mutex<Self>>> {
+    pub async fn new(ws_url: Url) -> Result<Arc<Mutex<Self>>,Error> {
         println!("Attempting to connect to WebSocket at: {}", ws_url);
-        let (socket, _) = connect_async(&ws_url).await.context("Failed to connect to WebSocket")?;
+        let (socket, _) = connect_async(&ws_url).await.map_err(Error::WebSocketConnectionError)?;
         println!("WebSocket connection established.");
         let provider = Provider::connect("testnet.fuel.network").await?;
         println!("Blockchain provider connected.");
         let private_key = ev("PRIVATE_KEY")?;
         let contract_id = ev("CONTRACT_ID")?;
+        let secret_key = match SecretKey::from_str(&private_key) {
+            Ok(sk) => sk,
+            Err(_) => {
+                return Err(Error::FuelCryptoPrivParseError);
+            },
+        };
+
         let wallet = WalletUnlocked::new_from_private_key(
-            SecretKey::from_str(&private_key)?,
+            secret_key,
             Some(provider.clone()),
         );
         println!("Wallet created and connected to contract.");
@@ -153,7 +160,7 @@ impl SparkMatcher {
         }
     }
 
-    async fn match_orders(&self, state: &mut MatcherState) -> Result<()> {
+    async fn match_orders(&self, state: &mut MatcherState) -> Result<(),Error> {
         println!("Attempting to match orders...");
 
         state.buy_orders.sort_by(|a, b| b.price.parse::<u128>().unwrap().cmp(&a.price.parse::<u128>().unwrap()));
@@ -204,7 +211,7 @@ impl SparkMatcher {
 
 }
 
-async fn post_matched_orders(matches: &[(String, String, u128)], market: &MarketContract) -> Result<()> {
+async fn post_matched_orders(matches: &[(String, String, u128)], market: &MarketContract) -> Result<(),Error> {
     println!("Posting matched orders to the blockchain...");
 
     let ids: Vec<Bits256> = matches.iter()
