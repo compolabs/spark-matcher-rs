@@ -6,7 +6,6 @@ edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
-anyhow = "1.0.82"
 chrono = "0.4.38"
 dotenv = "0.15.0"
 fern = "0.6.2"

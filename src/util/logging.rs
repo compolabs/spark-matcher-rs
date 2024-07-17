@@ -1,10 +1,9 @@
 use crate::config::ev;
-use anyhow::{anyhow, Result};
 use chrono::Local;
 use fern::Dispatch;
 use log::LevelFilter;
 use std::fs::OpenOptions;
-
+/*
 pub fn log_level(level_str: &str) -> Result<LevelFilter> {
     match level_str {
         "off" => Ok(LevelFilter::Off),
@@ -71,3 +70,4 @@ pub fn setup_logging() -> Result<()> {
 
     Ok(())
 }
+*/
