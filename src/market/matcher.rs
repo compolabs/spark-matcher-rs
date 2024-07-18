@@ -5,13 +5,17 @@ use fuels::{
     crypto::SecretKey,
     types::ContractId,
 };
+use tokio::net::TcpStream;
+use tokio::time::sleep;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use std::cmp::Ordering;
+use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info};
 use serde_json::Value;
 use spark_market_sdk::MarketContract;
 use std::{str::FromStr, sync::Arc};
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use url::Url;
 
@@ -20,14 +24,19 @@ use crate::error::Error;
 use crate::model::{OrderType, SpotOrder};
 use crate::api::subscription::format_graphql_subscription;
 
+pub type WSStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+pub struct ControlState {
+    pub active: bool,
+}
+
 pub struct MatcherState {
     pub buy_orders: Vec<SpotOrder>,
     pub sell_orders: Vec<SpotOrder>,
     pub market: MarketContract,
-    pub active: bool
 }
 
-impl MatcherState {
+impl ControlState {
     pub fn activate(&mut self) {
         self.active = true;
     }
@@ -41,13 +50,23 @@ impl MatcherState {
     }
 }
 
+pub enum MatcherCommand {
+    Start,
+    Stop,
+    Status,
+}
+
 pub struct SparkMatcher {
-    pub state: Arc<Mutex<MatcherState>>,
-    pub client: Arc<Mutex<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>>,
+    pub control_state: Arc<RwLock<ControlState>>,
+    pub matcher_state: Arc<RwLock<MatcherState>>,
+    pub client: Option<Arc<Mutex<WSStream>>>,
+    pub ws_url: Url,
+    pub command_sender: mpsc::Sender<MatcherCommand>,
 }
 
 impl SparkMatcher {
-    pub async fn new(ws_url: Url) -> Result<Arc<Mutex<Self>>,Error> {
+    pub async fn new(ws_url: Url) -> Result<Arc<Self>,Error> {
+        let (sender, receiver) = mpsc::channel(100);
         info!("Attempting to connect to WebSocket at: {}", ws_url);
         let (socket, _) = connect_async(&ws_url).await.map_err(Error::WebSocketConnectionError)?;
         info!("WebSocket connection established.");
@@ -71,54 +90,124 @@ impl SparkMatcher {
         let market = MarketContract::new(ContractId::from_str(&contract_id)?, wallet).await;
         info!("Market contract initialized.");
 
-        let state = MatcherState {
+        let control_state = ControlState { active: true };
+        let matcher_state = MatcherState {
             buy_orders: Vec::new(),
             sell_orders: Vec::new(),
             market,
-            active: true,
         };
+        let matcher = Arc::new(Self {
+            control_state: Arc::new(RwLock::new(control_state)),
+            matcher_state: Arc::new(RwLock::new(matcher_state)),
+            client: None,
+            ws_url,
+            command_sender: sender,
+        });
 
-        Ok(Arc::new(Mutex::new(Self {
-            state: Arc::new(Mutex::new(state)),
-            client: Arc::new(Mutex::new(socket)),
-        })))
+        let matcher_clone = Arc::clone(&matcher);
+        tokio::spawn(async move {
+            matcher_clone.run(receiver).await;
+        });
+
+        Ok(matcher)
     }
 
-    pub async fn run(&mut self) {
-        let mut client = self.client.lock().await;
+    pub async fn reconnect(&mut self) -> Result<(), Error> {
+        let (socket, _) = connect_async(&self.ws_url).await.map_err(Error::WebSocketConnectionError)?;
+        info!("WebSocket connection established.");
+        self.client = Some(Arc::new(Mutex::new(socket)));
+        Ok(())
+    }
 
-        client.send(Message::Text(r#"{"type": "connection_init"}"#.into())).await.expect("Failed to send init message");
-
+    pub async fn run(self: Arc<Mutex<Self>>, mut receiver: mpsc::Receiver<MatcherCommand>) {
         let mut initialized = false;
-        while let Some(message) = client.next().await {
-            if self.state.lock().await.active {
-                match message {
-                    Ok(Message::Text(text)) => {
-                        if text.contains("connection_ack") && !initialized {
-                            info!("Connection established, subscribing to orders...");
-                            self.subscribe_to_orders(OrderType::Buy, &mut client).await;
-                            self.subscribe_to_orders(OrderType::Sell, &mut client).await;
-                            initialized = true;
-                        } else if text.contains("ka") {
-                            info!("Keep-alive message received.");
-                        } else {
-                            self.process_message(&text).await;
-                        }
-                    },
-                    Ok(_) => {},
-                    Err(e) => {
-                        error!("Error during receive: {:?}", e);
-                        break;
+        loop {
+            tokio::select! {
+                Some(command) = receiver.recv() => {
+                    match command {
+                        MatcherCommand::Start => {
+                            let mut control_state = self.lock().await.control_state.write().await;
+                            control_state.activate();
+                            info!("Matcher activated.");
+                        },
+                        MatcherCommand::Stop => {
+                            let mut control_state = self.lock().await.control_state.write().await;
+                            control_state.deactivate();
+                            info!("Matcher deactivated.");
+                        },
+                        MatcherCommand::Status => {
+                            let control_state = self.lock().await.control_state.read().await;
+                            info!("Matcher status: active={}", control_state.is_active());
+                        },
                     }
-                }
+                },
+                _ = async {
+                    let active = {
+                        let control_state = self.lock().await.control_state.read().await;
+                        control_state.is_active()
+                    };
+
+                    if active {
+                        let mut need_reconnect = false;
+
+                        if self.lock().await.client.is_none() {
+                            if let Err(e) = self.lock().await.reconnect().await {
+                                error!("Connection failed: {:?}", e);
+                                tokio::time::sleep(Duration::from_secs(10)).await;
+                                return;
+                            }
+                        }
+
+                        if let Some(client) = &self.lock().await.client {
+                            let mut client_guard = client.lock().await;
+                            while let Some(message_result) = client_guard.next().await {
+                                match message_result {
+                                    Ok(Message::Text(text)) => {
+                                        self.lock().await.process_text_message(&text, &mut client_guard, &mut initialized).await;
+                                    },
+                                    Ok(_) => {},
+                                    Err(e) => {
+                                        error!("Error during receive: {:?}", e);
+                                        need_reconnect = true;
+                                        break;
+                                    }
+                                }
+
+                                {
+                                    let control_state = self.lock().await.control_state.read().await;
+                                    if !control_state.is_active() {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if need_reconnect {
+                            self.lock().await.client = None;
+                        }
+                    }
+                } => {}
             }
         }
     }
 
+    async fn process_text_message(&self, text: &str, client: &mut WSStream, initialized: &mut bool) {
+            if text.contains("connection_ack") && !*initialized {
+                info!("Connection established, subscribing to orders...");
+                self.subscribe_to_orders(OrderType::Buy, client).await;
+                self.subscribe_to_orders(OrderType::Sell, client).await;
+                *initialized = true;
+            } else if text.contains("ka") {
+                info!("Keep-alive message received.");
+            } else {
+                self.process_message(&text).await;
+            }
+        }
+
     async fn subscribe_to_orders(
         &self,
         order_type: OrderType,
-        client: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+        client: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     ) {
         let subscription_query = format_graphql_subscription(order_type);
         let start_msg = serde_json::json!({
@@ -135,7 +224,7 @@ impl SparkMatcher {
     async fn process_message(&self, message: &str) -> Result<(),Error> {
         let data: Value = serde_json::from_str(message)?;
         if data["type"] == "data" {
-            let mut state = self.state.lock().await;
+            let mut state = self.state.write().await;
             if let Some(array) = data["payload"]["data"]["Order"].as_array() {
                 state.buy_orders.extend(array.iter().filter_map(|v| {
                     if v["order_type"] == "Buy" {

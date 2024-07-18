@@ -6,8 +6,9 @@ use rocket_okapi::{openapi, openapi_get_routes, JsonSchema};
 use rocket_okapi::swagger_ui::SwaggerUIConfig;
 use serde::Serialize;
 use rocket_okapi::settings::UrlObject;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
+use crate::market::matcher::MatcherCommand;
 use crate::market::SparkMatcher;
 
 #[derive(Serialize, JsonSchema)]
@@ -18,48 +19,30 @@ pub struct StatusMessage {
 
 #[openapi]
 #[get("/start")]
-pub async fn start_matcher(matcher: &State<Arc<Mutex<SparkMatcher>>>) -> Json<StatusMessage> {
-    println!("Attempting to access matcher state");
-    let matcher = matcher.lock().await;
-    println!("Matcher state accessed, activating...");
-    matcher.state.lock().await.activate();
+pub async fn start_matcher(matcher: &State<Arc<SparkMatcher>>) -> Json<StatusMessage> {
+    matcher.command_sender.send(MatcherCommand::Start).await.unwrap();
     Json(StatusMessage { message: "Matcher activated.".to_string() })
 }
 
 #[openapi]
 #[get("/stop")]
-pub async fn stop_matcher(matcher: &State<Arc<Mutex<SparkMatcher>>>) -> Json<StatusMessage> {
-    println!("Attempting to access matcher state");
-    let matcher = matcher.lock().await;
-    println!("Matcher state accessed, deactivating...");
-    matcher.state.lock().await.deactivate();
+pub async fn stop_matcher(matcher: &State<Arc<SparkMatcher>>) -> Json<StatusMessage> {
+    matcher.command_sender.send(MatcherCommand::Stop).await.unwrap();
     Json(StatusMessage { message: "Matcher deactivated.".to_string() })
 }
 
 #[openapi]
 #[get("/status")]
-pub async fn status_matcher(matcher: &State<Arc<Mutex<SparkMatcher>>>) -> Json<StatusMessage> {
-    let matcher = matcher.lock().await;
-    let status = format!("Matcher active: {:?}", matcher.state.lock().await.is_active());
-    Json(StatusMessage { message: status})
+pub async fn status_matcher(matcher: &State<Arc<SparkMatcher>>) -> Json<StatusMessage> {
+    matcher.command_sender.send(MatcherCommand::Status).await.unwrap();
+    Json(StatusMessage { message: "Status command sent.".to_string() })
 }
-
-#[openapi]
-#[get("/debug")]
-pub async fn debug_matcher_state(matcher: &State<Arc<Mutex<SparkMatcher>>>) -> String {
-    let matcher = matcher.inner().clone();
-    let matcher_locked = matcher.lock().await;
-    let is_active = matcher_locked.state.lock().await.is_active();
-    format!("Matcher is active: {}", is_active)
-}
-
 
 pub fn get_routes() -> Vec<Route> {
     openapi_get_routes![
         start_matcher, 
         stop_matcher,
         status_matcher,
-        debug_matcher_state
     ]
 }
 
