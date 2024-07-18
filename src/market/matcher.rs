@@ -135,6 +135,12 @@ impl SparkMatcher {
         state.buy_orders.sort_by(|a, b| b.price.parse::<u128>().unwrap().cmp(&a.price.parse::<u128>().unwrap()));
         state.sell_orders.sort_by(|a, b| a.price.parse::<u128>().unwrap().cmp(&b.price.parse::<u128>().unwrap()));
 
+        println!("-----------------------------------");
+        println!("buy_orders:{:?}",state.buy_orders);
+        println!("-----------------------------------");
+        println!("sell_orders:{:?}",state.buy_orders);
+        println!("-----------------------------------");
+
         let mut buy_index = 0;
         let mut sell_index = 0;
         let mut matches = Vec::new();
