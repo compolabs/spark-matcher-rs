@@ -6,7 +6,7 @@ pub enum OrderType {
     Sell,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct SpotOrder {
     pub id: String,
     pub user: String,

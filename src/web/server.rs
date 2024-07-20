@@ -7,9 +7,8 @@ use crate::market::SparkMatcher;
 
 use super::routes::{get_docs, get_routes};
 
-pub fn rocket(matcher: Arc<Mutex<SparkMatcher>>) -> Rocket<Build> {
+pub fn rocket() -> Rocket<Build> {
     rocket::build()
-        .manage(matcher)
         .mount("/", get_routes())
         .mount("/swagger", make_swagger_ui(&get_docs()))
 }

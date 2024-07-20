@@ -1,4 +1,4 @@
-use std::env::{self, VarError};
+use std::env;
 
 use crate::error::Error;
 

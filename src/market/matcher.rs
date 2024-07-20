@@ -5,7 +5,10 @@ use fuels::{
     crypto::SecretKey,
     types::ContractId,
 };
+use tokio::time;
 use std::cmp::Ordering;
+use std::sync::atomic::AtomicBool;
+use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info};
 use serde_json::Value;
@@ -20,29 +23,15 @@ use crate::error::Error;
 use crate::model::{OrderType, SpotOrder};
 use crate::api::subscription::format_graphql_subscription;
 
+
 pub struct MatcherState {
     pub buy_orders: Vec<SpotOrder>,
     pub sell_orders: Vec<SpotOrder>,
     pub market: MarketContract,
-    pub active: bool
-}
-
-impl MatcherState {
-    pub fn activate(&mut self) {
-        self.active = true;
-    }
-
-    pub fn deactivate(&mut self) {
-        self.active = false;
-    }
-
-    pub fn is_active(&self) -> bool {
-        self.active
-    }
 }
 
 pub struct SparkMatcher {
-    pub state: Arc<Mutex<MatcherState>>,
+    pub state: MatcherState,
     pub client: Arc<Mutex<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>>,
 }
 
@@ -75,42 +64,54 @@ impl SparkMatcher {
             buy_orders: Vec::new(),
             sell_orders: Vec::new(),
             market,
-            active: true,
         };
 
         Ok(Arc::new(Mutex::new(Self {
-            state: Arc::new(Mutex::new(state)),
+            state,
             client: Arc::new(Mutex::new(socket)),
         })))
     }
 
     pub async fn run(&mut self) {
-        let mut client = self.client.lock().await;
-
-        client.send(Message::Text(r#"{"type": "connection_init"}"#.into())).await.expect("Failed to send init message");
-
         let mut initialized = false;
-        while let Some(message) = client.next().await {
-            if self.state.lock().await.active {
-                match message {
-                    Ok(Message::Text(text)) => {
-                        if text.contains("connection_ack") && !initialized {
-                            info!("Connection established, subscribing to orders...");
-                            self.subscribe_to_orders(OrderType::Buy, &mut client).await;
-                            self.subscribe_to_orders(OrderType::Sell, &mut client).await;
-                            initialized = true;
-                        } else if text.contains("ka") {
-                            info!("Keep-alive message received.");
-                        } else {
-                            self.process_message(&text).await;
-                        }
-                    },
-                    Ok(_) => {},
-                    Err(e) => {
-                        error!("Error during receive: {:?}", e);
-                        break;
+
+        let running = Arc::new(AtomicBool::new(true));
+        let r = running.clone();
+        ctrlc::set_handler(move || {
+            r.store(false,  std::sync::atomic::Ordering::SeqCst);
+        }).expect("Error setting Ctrl-C handler");
+
+        while running.load(std::sync::atomic::Ordering::SeqCst) {
+            let message = {
+                let mut client = self.client.lock().await;
+                client.send(Message::Text(r#"{"type": "connection_init"}"#.into())).await.expect("Failed to send init message");
+
+                time::sleep(Duration::from_millis(100)).await; 
+
+
+                client.next().await
+            };
+
+            match message {
+                Some(Ok(Message::Text(text))) => {
+                    if text.contains("connection_ack") && !initialized {
+                        let mut client = self.client.lock().await;
+                        info!("Connection established, subscribing to orders...");
+                        self.subscribe_to_orders(OrderType::Buy, &mut client).await;
+                        self.subscribe_to_orders(OrderType::Sell, &mut client).await;
+                        initialized = true;
+                    } else if text.contains("ka") {
+                        info!("Keep-alive message received.");
+                    } else {
+                        self.process_message(&text).await;
                     }
-                }
+                },
+                Some(Ok(_)) => {},
+                Some(Err(e)) => {
+                    error!("Error during receive: {:?}", e);
+                    break;
+                },
+                None => break,
             }
         }
     }
@@ -132,12 +133,11 @@ impl SparkMatcher {
         client.send(Message::Text(start_msg)).await.expect("Failed to send subscription");
     }
 
-    async fn process_message(&self, message: &str) -> Result<(),Error> {
+    async fn process_message(&mut self, message: &str) -> Result<(),Error> {
         let data: Value = serde_json::from_str(message)?;
         if data["type"] == "data" {
-            let mut state = self.state.lock().await;
             if let Some(array) = data["payload"]["data"]["Order"].as_array() {
-                state.buy_orders.extend(array.iter().filter_map(|v| {
+                self.state.buy_orders.extend(array.iter().filter_map(|v| {
                     if v["order_type"] == "Buy" {
                         serde_json::from_value(v.clone()).ok()
                     } else {
@@ -145,7 +145,7 @@ impl SparkMatcher {
                     }
                 }));
 
-                state.sell_orders.extend(array.iter().filter_map(|v| {
+                self.state.sell_orders.extend(array.iter().filter_map(|v| {
                     if v["order_type"] == "Sell" {
                         serde_json::from_value(v.clone()).ok()
                     } else {
@@ -153,7 +153,7 @@ impl SparkMatcher {
                     }
                 }));
 
-                self.match_orders(&mut state).await
+                self.match_orders().await
             } else {
                 Err(Error::ProcessMessagePayloadError(data.to_string()))
             }
@@ -162,19 +162,19 @@ impl SparkMatcher {
         }
     }
 
-    async fn match_orders(&self, state: &mut MatcherState) -> Result<(),Error> {
+    async fn match_orders(&mut self ) -> Result<(),Error> {
         info!("Attempting to match orders...");
 
-        state.buy_orders.sort_by(|a, b| compare_values(&a.price, &b.price, false));
-        state.sell_orders.sort_by(|a, b| compare_values(&a.price, &b.price, true));
+        self.state.buy_orders.sort_by(|a, b| compare_values(&a.price, &b.price, false));
+        self.state.sell_orders.sort_by(|a, b| compare_values(&a.price, &b.price, true));
 
         let mut buy_index = 0;
         let mut sell_index = 0;
         let mut matches = Vec::new();
 
-        while buy_index < state.buy_orders.len() && sell_index < state.sell_orders.len() {
-            let buy_order = &mut state.buy_orders[buy_index];
-            let sell_order = &mut state.sell_orders[sell_index];
+        while buy_index < self.state.buy_orders.len() && sell_index < self.state.sell_orders.len() {
+            let buy_order = &mut self.state.buy_orders[buy_index];
+            let sell_order = &mut self.state.sell_orders[sell_index];
 
             if buy_order.price.parse::<u128>()? >= sell_order.price.parse::<u128>()? {
                 let buy_amount = buy_order.amount.parse::<u128>()?;
@@ -202,12 +202,12 @@ impl SparkMatcher {
         }
 
         if !matches.is_empty() {
-            post_matched_orders(&matches, &state.market).await?;
+            post_matched_orders(&matches, &self.state.market).await?;
         }
 
 
-        state.buy_orders.retain(|order| parse_u128_or_log(&order.amount).map_or(false, |num| num > 0));
-        state.sell_orders.retain(|order| parse_u128_or_log(&order.amount).map_or(false, |num| num > 0));
+        self.state.buy_orders.retain(|order| parse_u128_or_log(&order.amount).map_or(false, |num| num > 0));
+        self.state.sell_orders.retain(|order| parse_u128_or_log(&order.amount).map_or(false, |num| num > 0));
 
         Ok(())
     }
