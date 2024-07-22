@@ -1,10 +1,12 @@
 mod api;
 mod config;
+mod error;
 mod market;
+mod management;
 mod model;
 mod util;
 mod web;
-mod error;
+mod websocket;
 
 use std::sync::Arc;
 
