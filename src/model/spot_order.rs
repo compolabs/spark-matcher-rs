@@ -1,6 +1,7 @@
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum OrderType {
     Buy,
     Sell,
@@ -17,24 +18,48 @@ pub struct SpotOrder {
     pub order_type: OrderType,
 }
 
-
-
-impl<'de> Deserialize<'de> for OrderType {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        match s.as_ref() {
-            "Buy" => Ok(OrderType::Buy),
-            "Sell" => Ok(OrderType::Sell),
-            _ => Err(serde::de::Error::custom("unknown order type")),
-        }
-    }
+#[derive(Debug, Clone, Deserialize)]
+pub struct SpotOrderIndexer {
+    pub id: String,
+    pub user: String,
+    pub asset: String,
+    pub amount: String,
+    pub price: String,
+    pub timestamp: String,
+    pub order_type: OrderType,
 }
 
 impl SpotOrder {
-    pub fn new_from_json(json: &str) -> Result<Self, serde_json::Error> {
-        serde_json::from_str::<Self>(json)
+    pub fn from_indexer(intermediate: SpotOrderIndexer) -> Result<Self, Box<dyn std::error::Error>> {
+        let amount = intermediate.amount.parse::<u128>()?;
+        let price = intermediate.price.parse::<u128>()?;
+        let timestamp = chrono::DateTime::parse_from_rfc3339(&intermediate.timestamp)?.timestamp() as u64;
+        
+        Ok(SpotOrder {
+            id: intermediate.id,
+            user: intermediate.user,
+            asset: intermediate.asset,
+            amount,
+            price,
+            timestamp,
+            order_type: intermediate.order_type,
+        })
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrderPayload {
+    pub Order: Vec<SpotOrderIndexer>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DataPayload {
+    pub data: OrderPayload,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebSocketResponse {
+    pub r#type: String,
+    pub id: Option<String>,
+    pub payload: Option<DataPayload>,
 }

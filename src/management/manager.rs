@@ -1,11 +1,12 @@
 use std::collections::BTreeMap;
+use log::info;
 use tokio::sync::RwLock;
 use crate::model::{SpotOrder, OrderType};
 use std::sync::Arc;
 
 pub struct OrderManager {
-    buy_orders: RwLock<BTreeMap<u128, Vec<SpotOrder>>>,
-    sell_orders: RwLock<BTreeMap<u128, Vec<SpotOrder>>>,
+    pub buy_orders: RwLock<BTreeMap<u128, Vec<SpotOrder>>>,
+    pub sell_orders: RwLock<BTreeMap<u128, Vec<SpotOrder>>>,
 }
 
 impl OrderManager {
@@ -48,5 +49,20 @@ impl OrderManager {
         };
 
         order_map.get(&price).cloned().unwrap_or_else(Vec::new)
+    }
+
+    pub async fn log_orders(&self) {
+        let buy_orders = self.buy_orders.read().await;
+        let sell_orders = self.sell_orders.read().await;
+
+        info!("Current Buy Orders:");
+        for (price, orders) in buy_orders.iter() {
+            info!("Price: {} -> Orders: {:?}", price, orders);
+        }
+
+        info!("Current Sell Orders:");
+        for (price, orders) in sell_orders.iter() {
+            info!("Price: {} -> Orders: {:?}", price, orders);
+        }
     }
 }

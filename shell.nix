@@ -22,12 +22,13 @@ in pkgs.stdenv.mkDerivation rec {
 
     echo "Setting up the environment for Matcher..."
 
-    # Параметры для запуска PostgreSQL
+    export RUST_LOG=info
+    echo "RUST_LOG is set to $RUST_LOG"
+
     export PGDATA=./pgsql-data
     export PGHOST=/tmp
     export PGPORT=5432
 
-    # Инициализация и запуск PostgreSQL
     if [ ! -d "$PGDATA" ]; then
       mkdir -p $PGDATA
       pg_ctl init -D $PGDATA
@@ -41,14 +42,12 @@ in pkgs.stdenv.mkDerivation rec {
 
     export DATABASE_URL="postgresql://metagm:metagm@localhost:$PGPORT/matcher_db"
 
-    # Применение миграций
     if [ -d ./migrations ]; then
       sqlx database create
       sqlx migrate run
       echo "Database migrations have been applied."
     fi
 
-    # Обработка команды выхода
     function cleanup {
       echo "Cleaning up..."
       pg_ctl stop -D $PGDATA

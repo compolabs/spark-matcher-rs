@@ -1,10 +1,10 @@
 CREATE TABLE IF NOT EXISTS transactions (
     transaction_id SERIAL PRIMARY KEY,
-    amount DECIMAL NOT NULL,
-    order_received_time TIMESTAMP WITH TIME ZONE NOT NULL, -- Время получения ордера, должно быть указано при вставке
-    match_time TIMESTAMP WITH TIME ZONE,
-    posting_time TIMESTAMP WITH TIME ZONE,
-    blockchain_confirmation_time TIMESTAMP WITH TIME ZONE,
+    amount TEXT NOT NULL,
+    order_received_time TEXT NOT NULL, 
+    match_time TEXT,
+    posting_time TEXT,
+    blockchain_confirmation_time TEXT,
     gas_used INT,
     details JSONB
 );
