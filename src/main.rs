@@ -1,4 +1,5 @@
 use market::SparkMatcher;
+use sqlx::PgPool;
 use tokio::signal;
 use tokio::sync::mpsc;
 
@@ -28,6 +29,9 @@ async fn main() -> Result<(), Error> {
     let order_manager = OrderManager::new();
     let arc_order_manager = order_manager.clone();
 
+    let database_url = config::ev("DATABASE_URL")?;
+    let db_pool = PgPool::connect(&database_url).await.unwrap();
+
     let spark_matcher = SparkMatcher::new(arc_order_manager.clone()).await?;
 
     let (tx, mut rx) = mpsc::channel(100);
@@ -51,7 +55,7 @@ async fn main() -> Result<(), Error> {
     });
 
     let rocket_task = tokio::spawn(async {
-        let rocket = web::server::rocket();
+        let rocket = web::server::rocket(db_pool);
         let _ = rocket.launch().await;
     });
 
