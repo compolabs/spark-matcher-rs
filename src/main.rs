@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 mod api;
 mod config;
 mod error;
+mod logger;
 mod management;
 mod market;
 mod model;

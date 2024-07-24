@@ -33,11 +33,13 @@ in pkgs.stdenv.mkDerivation rec {
       mkdir -p $PGDATA
       pg_ctl init -D $PGDATA
       echo "unix_socket_directories = '$PGHOST'" >> $PGDATA/postgresql.conf
-      pg_ctl start -D $PGDATA -o "-k $PGHOST"
+      echo "logging_collector = off" >> $PGDATA/postgresql.conf
+      echo "log_min_messages = fatal" >> $PGDATA/postgresql.conf
+      pg_ctl start -D $PGDATA -o "-k $PGHOST" > /dev/null 2>&1
       psql -d postgres -c "CREATE ROLE metagm LOGIN CREATEDB PASSWORD 'metagm';"
       psql -d postgres -c "CREATE DATABASE matcher_db OWNER metagm ENCODING 'UTF8';"
     else
-      pg_ctl start -D $PGDATA -o "-k $PGHOST"
+      pg_ctl start -D $PGDATA -o "-k $PGHOST" > /dev/null 2>&1
     fi
 
     export DATABASE_URL="postgresql://metagm:metagm@localhost:$PGPORT/matcher_db"
@@ -50,7 +52,7 @@ in pkgs.stdenv.mkDerivation rec {
 
     function cleanup {
       echo "Cleaning up..."
-      pg_ctl stop -D $PGDATA
+      pg_ctl stop -D $PGDATA > /dev/null 2>&1
     }
     trap cleanup EXIT
 

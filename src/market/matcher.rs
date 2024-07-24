@@ -9,10 +9,12 @@ use fuels::{
 };
 use log::{info, error};
 use sqlx::types::BigDecimal;
+use tokio::sync::mpsc;
 use tokio::time::Instant;
 use std::str::FromStr;
 use std::sync::Arc;
 use crate::config::ev;
+use crate::logger::{log_transactions, TransactionLog};
 use crate::management::manager::OrderManager;
 use crate::model::{SpotOrder, OrderType};
 use crate::error::Error;
@@ -23,7 +25,7 @@ use serde_json::json;
 pub struct SparkMatcher {
     pub order_manager: Arc<OrderManager>,
     pub market: MarketContract,
-    pub db_pool: PgPool,
+    pub log_sender: mpsc::UnboundedSender<TransactionLog>,
 }
 
 impl SparkMatcher {
@@ -38,10 +40,13 @@ impl SparkMatcher {
         let database_url = ev("DATABASE_URL")?;
         let db_pool = PgPool::connect(&database_url).await.unwrap();
 
+        let (log_sender, log_receiver) = mpsc::unbounded_channel();
+        tokio::spawn(log_transactions(log_receiver, db_pool));
+
         Ok(Self {
             order_manager,
             market,
-            db_pool,
+            log_sender,
         })
     }
 
@@ -121,13 +126,23 @@ impl SparkMatcher {
         let res = self.market.match_order_many(matches).await;
 
         match res {
-            Ok(r) =>{
+            Ok(r) => {
+                let duration = start.elapsed();
+                let log = TransactionLog {
+                    total_amount,
+                    matches_len,
+                    tx_id: r.tx_id.unwrap().to_string(),
+                    gas_used: r.gas_used,
+                    match_time_ms: duration.as_millis() as i64,
+                    buy_orders: buy_orders.len(),
+                    sell_orders: sell_orders.len(),
+                };
+                self.log_sender.send(log).unwrap();
                 info!(
                     "✅✅✅ Matched {} orders\nhttps://app.fuel.network/tx/0x{}/simple\n",
                     matches_len,
                     r.tx_id.unwrap().to_string(),
                 );
-                self.log_transaction(total_amount, matches_len, &r).await?;
             }
             Err(e) => {
                 error!("matching error `{}`\n", e);
@@ -135,36 +150,9 @@ impl SparkMatcher {
             }
         };
 
-        let duration = start.elapsed();
-        info!("SparkMatcher::match_orders executed in {:?}", duration);
-
         Ok(())
     }
 
-     async fn log_transaction(&self, total_amount: u128, matches_len: usize, res: &FuelCallResponse<()>) -> Result<(), Error> {
-        let amount = total_amount.to_string(); 
-        let order_received_time = Utc::now().to_rfc3339(); 
-        let match_time = order_received_time.clone(); // Это время, когда происходит матчинг
-        let details = json!({
-            "matches_len": matches_len,
-            "tx_id": res.tx_id.unwrap().to_string()
-        });
-
-        sqlx::query!(
-            r#"
-            INSERT INTO transactions (amount, order_received_time, match_time, details)
-            VALUES ($1, $2, $3, $4)
-            "#,
-            amount,
-            order_received_time,
-            match_time,
-            details
-        )
-        .execute(&self.db_pool)
-        .await.unwrap();
-
-        Ok(())
-    }
 }
 
 impl OrderManager {
