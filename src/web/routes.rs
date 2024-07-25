@@ -8,6 +8,10 @@ use serde::Serialize;
 use rocket_okapi::settings::UrlObject;
 use sqlx::types::BigDecimal;
 use sqlx::PgPool;
+use tokio::sync::RwLock;
+
+use crate::management::manager::OrderManager;
+use crate::model::SpotOrder;
 
 #[derive(Serialize, JsonSchema)]
 pub struct StatsResponse {
@@ -17,6 +21,17 @@ pub struct StatsResponse {
     pub avg_match_time_ms: String,
     pub buy_orders: i64,
     pub sell_orders: i64,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct OrdersResponse {
+    pub orders: Vec<SpotOrder>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct CurrentOrdersResponse {
+    pub buy_orders: Vec<SpotOrder>,
+    pub sell_orders: Vec<SpotOrder>,
 }
 
 #[openapi]
@@ -48,9 +63,33 @@ async fn get_stats(db: &State<PgPool>) -> Json<StatsResponse> {
     })
 }
 
+#[openapi]
+#[get("/orders/buy")]
+async fn get_buy_orders(manager: &State<Arc<OrderManager>>) -> Json<OrdersResponse> {
+    let buy_orders = manager.get_all_buy_orders().await;
+    Json(OrdersResponse { orders: buy_orders })
+}
+
+#[openapi]
+#[get("/orders/sell")]
+async fn get_sell_orders(manager: &State<Arc<OrderManager>>) -> Json<OrdersResponse> {
+    let sell_orders = manager.get_all_sell_orders().await;
+    Json(OrdersResponse { orders: sell_orders })
+}
+
+#[openapi]
+#[get("/orders/all")]
+async fn get_all_orders(manager: &State<Arc<OrderManager>>) -> Json<CurrentOrdersResponse> {
+    let (buy_orders, sell_orders) = manager.get_all_orders().await;
+    Json(CurrentOrdersResponse { buy_orders, sell_orders })
+}
+
 pub fn get_routes() -> Vec<Route> {
     openapi_get_routes![
         get_stats,
+        get_buy_orders,
+        get_sell_orders,
+        get_all_orders,
     ]
 }
 

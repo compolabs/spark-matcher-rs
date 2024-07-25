@@ -26,6 +26,7 @@ pub struct SparkMatcher {
     pub order_manager: Arc<OrderManager>,
     pub market: MarketContract,
     pub log_sender: mpsc::UnboundedSender<TransactionLog>,
+    pub last_receive_time: Arc<tokio::sync::Mutex<Instant>>,
 }
 
 impl SparkMatcher {
@@ -47,6 +48,7 @@ impl SparkMatcher {
             order_manager,
             market,
             log_sender,
+            last_receive_time: Arc::new(tokio::sync::Mutex::new(Instant::now())),
         })
     }
 
@@ -60,13 +62,20 @@ impl SparkMatcher {
     }
 
     pub async fn match_orders(&self) -> Result<(), Error> {
+        let receive_time = {
+            let mut last_receive_time = self.last_receive_time.lock().await;
+            let duration = last_receive_time.elapsed();
+            *last_receive_time = Instant::now();
+            duration.as_millis() as i64
+        };
+
         info!("-----Trying to match orders");
         let mut buy_orders = self.order_manager.buy_orders.write().await;
         let mut sell_orders = self.order_manager.sell_orders.write().await;
         info!("sell: {:?}", sell_orders.len());
         info!("buy: {:?}", buy_orders.len());
 
-        let start = Instant::now();
+        let match_start = Instant::now();
         let mut matches: Vec<(String, String, u128)> = Vec::new();
         let mut total_amount: u128 = 0;
 
@@ -119,6 +128,9 @@ impl SparkMatcher {
             return Ok(());
         }
 
+        let match_duration = match_start.elapsed().as_millis() as i64;
+
+        let post_start = Instant::now();
         let matches: Vec<Bits256> = matches
             .into_iter()
             .flat_map(|(buy_id, sell_id, _)| vec![Bits256::from_hex_str(&buy_id).unwrap(), Bits256::from_hex_str(&sell_id).unwrap()])
@@ -127,15 +139,17 @@ impl SparkMatcher {
 
         match res {
             Ok(r) => {
-                let duration = start.elapsed();
+                let post_duration = post_start.elapsed().as_millis() as i64;
                 let log = TransactionLog {
                     total_amount,
                     matches_len,
                     tx_id: r.tx_id.unwrap().to_string(),
                     gas_used: r.gas_used,
-                    match_time_ms: duration.as_millis() as i64,
+                    match_time_ms: match_duration,
                     buy_orders: buy_orders.len(),
                     sell_orders: sell_orders.len(),
+                    receive_time_ms: receive_time,
+                    post_time_ms: post_duration,
                 };
                 self.log_sender.send(log).unwrap();
                 info!(
@@ -151,18 +165,5 @@ impl SparkMatcher {
         };
 
         Ok(())
-    }
-
-}
-
-impl OrderManager {
-    pub async fn get_all_orders(&self) -> (Vec<SpotOrder>, Vec<SpotOrder>) {
-        let buy_orders = self.buy_orders.read().await;
-        let sell_orders = self.sell_orders.read().await;
-
-        let buy_list = buy_orders.values().flat_map(|v| v.clone()).collect();
-        let sell_list = sell_orders.values().flat_map(|v| v.clone()).collect();
-
-        (buy_list, sell_list)
     }
 }

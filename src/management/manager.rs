@@ -51,6 +51,22 @@ impl OrderManager {
         order_map.get(&price).cloned().unwrap_or_else(Vec::new)
     }
 
+    pub async fn get_all_buy_orders(&self) -> Vec<SpotOrder> {
+        let buy_orders = self.buy_orders.read().await;
+        buy_orders.values().cloned().flatten().collect()
+    }
+
+    pub async fn get_all_sell_orders(&self) -> Vec<SpotOrder> {
+        let sell_orders = self.sell_orders.read().await;
+        sell_orders.values().cloned().flatten().collect()
+    }
+
+    pub async fn get_all_orders(&self) -> (Vec<SpotOrder>, Vec<SpotOrder>) {
+        let buy_orders = self.get_all_buy_orders().await;
+        let sell_orders = self.get_all_sell_orders().await;
+        (buy_orders, sell_orders)
+    }   
+
     pub async fn log_orders(&self) {
         let buy_orders = self.buy_orders.read().await;
         let sell_orders = self.sell_orders.read().await;

@@ -55,7 +55,7 @@ async fn main() -> Result<(), Error> {
     });
 
     let rocket_task = tokio::spawn(async {
-        let rocket = web::server::rocket(db_pool);
+        let rocket = web::server::rocket(db_pool, arc_order_manager);
         let _ = rocket.launch().await;
     });
 

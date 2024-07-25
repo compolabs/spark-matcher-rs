@@ -6,5 +6,7 @@ CREATE TABLE IF NOT EXISTS transaction_stats (
     total_gas_used INT,
     match_time_ms BIGINT,
     buy_orders INT,
-    sell_orders INT
+    sell_orders INT,
+    receive_time_ms BIGINT,
+    post_time_ms BIGINT
 );

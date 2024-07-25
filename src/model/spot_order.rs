@@ -1,13 +1,14 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, JsonSchema, Serialize, Deserialize)]
 pub enum OrderType {
     Buy,
     Sell,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
 pub struct SpotOrder {
     pub id: String,
     pub user: String,
