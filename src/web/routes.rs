@@ -21,6 +21,8 @@ pub struct StatsResponse {
     pub avg_match_time_ms: String,
     pub buy_orders: i64,
     pub sell_orders: i64,
+    pub avg_receive_time_ms: String,
+    pub avg_post_time_ms: String,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -45,7 +47,9 @@ async fn get_stats(db: &State<PgPool>) -> Json<StatsResponse> {
             COALESCE(SUM(total_gas_used), 0) AS total_gas_used,
             COALESCE(AVG(match_time_ms), 0) AS avg_match_time_ms,
             COALESCE(SUM(buy_orders), 0) AS buy_orders,
-            COALESCE(SUM(sell_orders), 0) AS sell_orders
+            COALESCE(SUM(sell_orders), 0) AS sell_orders,
+            COALESCE(AVG(receive_time_ms), 0) AS avg_receive_time_ms,
+            COALESCE(AVG(post_time_ms), 0) AS avg_post_time_ms
         FROM transaction_stats
         "#,
     )
@@ -60,6 +64,8 @@ async fn get_stats(db: &State<PgPool>) -> Json<StatsResponse> {
         avg_match_time_ms: row.avg_match_time_ms.unwrap_or(BigDecimal::from(0)).to_string(),
         buy_orders: row.buy_orders.unwrap_or(0),
         sell_orders: row.sell_orders.unwrap_or(0),
+        avg_receive_time_ms: row.avg_receive_time_ms.unwrap_or(BigDecimal::from(0)).to_string(),
+        avg_post_time_ms: row.avg_post_time_ms.unwrap_or(BigDecimal::from(0)).to_string(),
     })
 }
 

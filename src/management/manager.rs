@@ -23,9 +23,13 @@ impl OrderManager {
             OrderType::Sell => self.sell_orders.write().await,
         };
 
-        order_map.entry(order.price)
-                 .or_default()
-                 .push(order);
+        let orders = order_map.entry(order.price).or_default();
+
+        if let Some(existing_order) = orders.iter_mut().find(|o| o.id == order.id) {
+            *existing_order = order;
+        } else {
+            orders.push(order);
+        }
     }
 
     pub async fn remove_order(&self, order_id: &str, price: u128, order_type: OrderType) {
@@ -61,7 +65,7 @@ impl OrderManager {
         sell_orders.values().cloned().flatten().collect()
     }
 
-    pub async fn get_all_orders(&self) -> (Vec<SpotOrder>, Vec<SpotOrder>) {
+    pub async fn get_all_orders2(&self) -> (Vec<SpotOrder>, Vec<SpotOrder>) {
         let buy_orders = self.get_all_buy_orders().await;
         let sell_orders = self.get_all_sell_orders().await;
         (buy_orders, sell_orders)

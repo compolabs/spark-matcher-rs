@@ -8,7 +8,7 @@ pub enum OrderType {
     Sell,
 }
 
-#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize, Eq)]
 pub struct SpotOrder {
     pub id: String,
     pub user: String,
@@ -17,6 +17,24 @@ pub struct SpotOrder {
     pub price: u128,
     pub timestamp: u64,
     pub order_type: OrderType,
+}
+
+impl PartialEq for SpotOrder {
+    fn eq(&self, other: &Self) -> bool {
+        self.price == other.price
+    }
+}
+
+impl Ord for SpotOrder {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.price.cmp(&other.price)
+    }
+}
+
+impl PartialOrd for SpotOrder {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
