@@ -43,8 +43,9 @@ async fn main() -> Result<(), Error> {
     });
 
     let manager_task = tokio::spawn(async move {
-        while let Some(order) = rx.recv().await {
-            order_manager.add_order(order).await;
+        while let Some((order_buy,order_sell)) = rx.recv().await {
+            //order_manager.add_order(order).await;
+            order_manager.reset_and_fill_orders(order_buy,order_sell).await;
         }
     });
 

@@ -71,6 +71,22 @@ impl OrderManager {
         (buy_orders, sell_orders)
     }   
 
+    pub async fn reset_and_fill_orders(&self, new_buy_orders: Vec<SpotOrder>, new_sell_orders: Vec<SpotOrder>) {
+        let mut buy_orders = self.buy_orders.write().await;
+        let mut sell_orders = self.sell_orders.write().await;
+
+        buy_orders.clear();
+        sell_orders.clear();
+
+        for order in new_buy_orders {
+            buy_orders.entry(order.price).or_default().push(order);
+        }
+
+        for order in new_sell_orders {
+            sell_orders.entry(order.price).or_default().push(order);
+        }
+    }
+
     pub async fn log_orders(&self) {
         let buy_orders = self.buy_orders.read().await;
         let sell_orders = self.sell_orders.read().await;

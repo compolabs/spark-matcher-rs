@@ -17,7 +17,7 @@ impl WebSocketClient {
         WebSocketClient { url }
     }
 
-    pub async fn connect(&self, sender: mpsc::Sender<SpotOrder>) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn connect(&self, sender: mpsc::Sender<(Vec<SpotOrder>,Vec<SpotOrder>)>) -> Result<(), Box<dyn std::error::Error>> {
         info!("Establishing websocket connection to {}", self.url);
         let (mut ws_stream, _) = match connect_async(&self.url).await {
             Ok((ws_stream, response)) => {
@@ -42,29 +42,36 @@ impl WebSocketClient {
             match message {
                 Ok(Message::Text(text)) => {
                     if let Ok(response) = serde_json::from_str::<WebSocketResponse>(&text) {
-                        if response.r#type == "ka" {
-                            info!("Received keep-alive message.");
-                            continue;
-                        } else if response.r#type == "connection_ack" {
-                            if !initialized {
-                                info!("Connection established, subscribing to orders...");
-                                self.subscribe_to_orders(OrderType::Buy, &mut ws_stream).await?;
-                                self.subscribe_to_orders(OrderType::Sell, &mut ws_stream).await?;
-                                initialized = true;
-                                continue;
-                            }
-                        } else if response.r#type == "data" {
-                            if let Some(payload) = response.payload {
-                                for order_indexer in payload.data.Order {
-                                    let spot_order = SpotOrder::from_indexer(order_indexer)?;
-                                    sender.send(spot_order).await?;
+                        match response.r#type.as_str() {
+                            "ka" => info!("Received keep-alive message."),
+                            "connection_ack" => {
+                                if !initialized {
+                                    info!("Connection established, subscribing to orders...");
+                                    self.subscribe_to_orders(OrderType::Buy, &mut ws_stream).await?;
+                                    self.subscribe_to_orders(OrderType::Sell, &mut ws_stream).await?;
+                                    initialized = true;
                                 }
-                            }
+                            },
+                            "data" => {
+                                if let Some(payload) = response.payload {
+                                    let mut new_buy_orders = Vec::new();
+                                    let mut new_sell_orders = Vec::new();
+                                    for order_indexer in payload.data.Order {
+                                        let spot_order = SpotOrder::from_indexer(order_indexer)?;
+                                        match spot_order.order_type {
+                                            OrderType::Buy => new_buy_orders.push(spot_order),
+                                            OrderType::Sell => new_sell_orders.push(spot_order),
+                                        }
+                                    }
+                                    sender.send((new_buy_orders, new_sell_orders)).await?;
+                                }
+                            },
+                            _ => error!("Unexpected response type: {}", response.r#type),
                         }
                     } else {
                         error!("Failed to deserialize WebSocketResponse: {:?}", text);
                     }
-                }
+                },
                 Ok(_) => continue,
                 Err(e) => {
                     error!("Error in websocket connection: {:?}", e);
