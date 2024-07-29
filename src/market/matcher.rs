@@ -155,11 +155,13 @@ impl SparkMatcher {
                 .flat_map(|(buy_id, sell_id, _)| vec![Bits256::from_hex_str(&buy_id).unwrap(), Bits256::from_hex_str(&sell_id).unwrap()])
                 .collect();
 */
+            /*
             println!("=================================================");
             println!("=================================================");
             println!("matches {:?}",matches);
             println!("=================================================");
             println!("=================================================");
+            */
             let res = self.market.match_order_many(unique_bits256_ids).await;
             /*
             let a = Bits256::from_hex_str("0x7e9927af85019fa02bc244477f72cb132a7a8b8ea6becf0e30f8a042de2f5397").unwrap();
