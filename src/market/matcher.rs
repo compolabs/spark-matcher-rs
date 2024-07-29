@@ -12,7 +12,7 @@ use sqlx::PgPool;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
 use crate::config::ev;
@@ -77,6 +77,8 @@ impl SparkMatcher {
             let mut buy_queue = BinaryHeap::new();
             let mut sell_queue = BinaryHeap::new();
 
+
+
             {
                 let buy_orders = self.order_manager.buy_orders.read().await;
                 for (_, orders) in buy_orders.iter() {
@@ -128,11 +130,37 @@ impl SparkMatcher {
             let post_start = Instant::now();
             info!("Post start time: {:?}", post_start);
 
+            let unique_order_ids: HashSet<String> = matches.iter()
+                .flat_map(|(buy_id, sell_id, _)| vec![buy_id.clone(), sell_id.clone()])
+                .collect();
+
+            let unique_bits256_ids: Vec<Bits256> = unique_order_ids
+                .iter()
+                .map(|id| Bits256::from_hex_str(id).unwrap())
+                .collect();
+/*
+            let formatted_log = self.format_order_info(
+                &matches.iter().map(|(buy_id, _, amount)| (buy_id.clone(), format!("Price: TBD"), *amount)).collect::<Vec<_>>(),
+                &matches.iter().map(|(_, sell_id, amount)| (sell_id.clone(), format!("Price: TBD"), *amount)).collect::<Vec<_>>()
+            );
+            info!("Matched Orders:\n{}", formatted_log);
+
+            let matches_human: Vec<String> = matches.clone()
+                .into_iter()
+                .flat_map(|(buy_id, sell_id, _)| vec![buy_id, sell_id])
+                .collect();
+
             let matches: Vec<Bits256> = matches
                 .into_iter()
                 .flat_map(|(buy_id, sell_id, _)| vec![Bits256::from_hex_str(&buy_id).unwrap(), Bits256::from_hex_str(&sell_id).unwrap()])
                 .collect();
-            let res = self.market.match_order_many(matches).await;
+*/
+            println!("=================================================");
+            println!("=================================================");
+            println!("matches {:?}",matches);
+            println!("=================================================");
+            println!("=================================================");
+            let res = self.market.match_order_many(unique_bits256_ids).await;
             /*
             let a = Bits256::from_hex_str("0x7e9927af85019fa02bc244477f72cb132a7a8b8ea6becf0e30f8a042de2f5397").unwrap();
             let b = Bits256::from_hex_str("0x48b64d43c40f3a70617475d345bfd709c233e43e3c78e44be42efb77a849f8bd").unwrap();
@@ -182,6 +210,20 @@ impl SparkMatcher {
         };
 
         Ok(())
+    }
+
+   fn format_order_info(&self, buy_orders: &[(String, String, u128)], sell_orders: &[(String, String, u128)]) -> String {
+        let mut logs = Vec::new();
+        logs.push("🔵 Buy Orders:".to_string());
+        for (id, price, amount) in buy_orders {
+            logs.push(format!("ID: {}, Price: {}, Amount: {}", id, price, amount));
+        }
+        logs.push("🔴 Sell Orders:".to_string());
+        for (id, price, amount) in sell_orders {
+            logs.push(format!("ID: {}, Price: {}, Amount: {}", id, price, amount));
+        }
+
+        logs.join("\n")
     }
 }
 
