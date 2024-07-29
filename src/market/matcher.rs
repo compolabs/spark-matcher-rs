@@ -161,6 +161,7 @@ impl SparkMatcher {
             println!("=================================================");
             println!("=================================================");
             let res = self.market.match_order_many(unique_bits256_ids).await;
+            self.order_manager.clear_orders().await;
             /*
             let a = Bits256::from_hex_str("0x7e9927af85019fa02bc244477f72cb132a7a8b8ea6becf0e30f8a042de2f5397").unwrap();
             let b = Bits256::from_hex_str("0x48b64d43c40f3a70617475d345bfd709c233e43e3c78e44be42efb77a849f8bd").unwrap();

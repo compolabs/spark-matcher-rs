@@ -32,6 +32,14 @@ impl OrderManager {
         }
     }
 
+    pub async fn clear_orders(&self) {
+        let mut buy_orders = self.buy_orders.write().await;
+        let mut sell_orders = self.sell_orders.write().await;
+        buy_orders.clear();
+        sell_orders.clear();
+        info!("All orders have been cleared from OrderManager");
+    }
+
     pub async fn remove_order(&self, order_id: &str, price: u128, order_type: OrderType) {
         let mut order_map = match order_type {
             OrderType::Buy => self.buy_orders.write().await,
