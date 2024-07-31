@@ -21,7 +21,7 @@ impl WebSocketClient {
         info!("Establishing websocket connection to {}", self.url);
         
         loop {
-            let mut ws_stream = match self.connect_to_ws().await { //======== Изменен вызов подключения
+            let mut ws_stream = match self.connect_to_ws().await { 
                 Ok(ws_stream) => ws_stream,
                 Err(e) => {
                     error!("Failed to establish websocket connection: {:?}", e);
@@ -29,13 +29,13 @@ impl WebSocketClient {
                 }
             };
 
-            let mut timeout = time::interval(Duration::from_secs(300)); //======== Добавлен таймер таймаута
+            let mut timeout = time::interval(Duration::from_secs(300)); 
 
             while let Some(message) = ws_stream.next().await {
                 tokio::select! {
                     _ = timeout.tick() => {
                         error!("No messages received in the last 5 minutes, reconnecting...");
-                        break; // Выходим из цикла для переподключения
+                        break; 
                     }
                     else => match message {
                         Ok(Message::Text(text)) => {
@@ -55,7 +55,7 @@ impl WebSocketClient {
                                             sender.send(spot_order).await?;
                                         }
                                     }
-                                    timeout.reset(); //======== Сброс таймера при получении полезных данных
+                                    timeout.reset(); 
                                 }
                             } else {
                                 error!("Failed to deserialize WebSocketResponse: {:?}", text);
@@ -64,7 +64,7 @@ impl WebSocketClient {
                         Ok(_) => continue,
                         Err(e) => {
                             error!("Error in websocket connection: {:?}", e);
-                            break; // Выход из цикла для переподключения
+                            break; 
                         }
                     }
                 }
@@ -72,7 +72,7 @@ impl WebSocketClient {
         }
     }
 
-    async fn connect_to_ws(&self) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Box<dyn std::error::Error>> { //======== Новый метод для упрощения переподключения
+    async fn connect_to_ws(&self) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Box<dyn std::error::Error>> { 
         match connect_async(&self.url).await {
             Ok((ws_stream, response)) => {
                 info!("WebSocket handshake has been successfully completed with response: {:?}", response);
