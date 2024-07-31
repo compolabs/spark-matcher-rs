@@ -1,6 +1,6 @@
 use futures_util::StreamExt;
 use serde_json::Value;
-use tokio::{net::TcpStream, sync::mpsc};
+use tokio::{net::TcpStream, sync::mpsc, time::{self, Duration}};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream};
 use url::Url;
 use log::{info, error};
@@ -19,61 +19,70 @@ impl WebSocketClient {
 
     pub async fn connect(&self, sender: mpsc::Sender<SpotOrder>) -> Result<(), Box<dyn std::error::Error>> {
         info!("Establishing websocket connection to {}", self.url);
-        let (mut ws_stream, _) = match connect_async(&self.url).await {
-            Ok((ws_stream, response)) => {
-                info!("WebSocket handshake has been successfully completed with response: {:?}", response);
-                (ws_stream, response)
-            }
-            Err(e) => {
-                error!("Failed to establish websocket connection: {:?}", e);
-                return Err(Box::new(e));
-            }
-        };
-        info!("WebSocket connected");
-
-        ws_stream.send(Message::Text(r#"{"type": "connection_init"}"#.into())).await.expect("Failed to send init message");
-
-        let mut initialized = false;
-
-        self.subscribe_to_orders(OrderType::Buy, &mut ws_stream).await?;
-        self.subscribe_to_orders(OrderType::Sell, &mut ws_stream).await?;
-
-        while let Some(message) = ws_stream.next().await {
-            match message {
-                Ok(Message::Text(text)) => {
-                    if let Ok(response) = serde_json::from_str::<WebSocketResponse>(&text) {
-                        if response.r#type == "ka" {
-                            info!("Received keep-alive message.");
-                            continue;
-                        } else if response.r#type == "connection_ack" {
-                            if !initialized {
-                                info!("Connection established, subscribing to orders...");
-                                self.subscribe_to_orders(OrderType::Buy, &mut ws_stream).await?;
-                                self.subscribe_to_orders(OrderType::Sell, &mut ws_stream).await?;
-                                initialized = true;
-                                continue;
-                            }
-                        } else if response.r#type == "data" {
-                            if let Some(payload) = response.payload {
-                                for order_indexer in payload.data.Order {
-                                    let spot_order = SpotOrder::from_indexer(order_indexer)?;
-                                    sender.send(spot_order).await?;
-                                }
-                            }
-                        }
-                    } else {
-                        error!("Failed to deserialize WebSocketResponse: {:?}", text);
-                    }
-                }
-                Ok(_) => continue,
+        
+        loop {
+            let mut ws_stream = match self.connect_to_ws().await { //======== Изменен вызов подключения
+                Ok(ws_stream) => ws_stream,
                 Err(e) => {
-                    error!("Error in websocket connection: {:?}", e);
-                    break;
+                    error!("Failed to establish websocket connection: {:?}", e);
+                    return Err(e);
+                }
+            };
+
+            let mut timeout = time::interval(Duration::from_secs(300)); //======== Добавлен таймер таймаута
+
+            while let Some(message) = ws_stream.next().await {
+                tokio::select! {
+                    _ = timeout.tick() => {
+                        error!("No messages received in the last 5 minutes, reconnecting...");
+                        break; // Выходим из цикла для переподключения
+                    }
+                    else => match message {
+                        Ok(Message::Text(text)) => {
+                            if let Ok(response) = serde_json::from_str::<WebSocketResponse>(&text) {
+                                if response.r#type == "ka" {
+                                    info!("Received keep-alive message.");
+                                    continue;
+                                } else if response.r#type == "connection_ack" {
+                                    info!("Connection established, subscribing to orders...");
+                                    self.subscribe_to_orders(OrderType::Buy, &mut ws_stream).await?;
+                                    self.subscribe_to_orders(OrderType::Sell, &mut ws_stream).await?;
+                                    continue;
+                                } else if response.r#type == "data" {
+                                    if let Some(payload) = response.payload {
+                                        for order_indexer in payload.data.Order {
+                                            let spot_order = SpotOrder::from_indexer(order_indexer)?;
+                                            sender.send(spot_order).await?;
+                                        }
+                                    }
+                                    timeout.reset(); //======== Сброс таймера при получении полезных данных
+                                }
+                            } else {
+                                error!("Failed to deserialize WebSocketResponse: {:?}", text);
+                            }
+                        },
+                        Ok(_) => continue,
+                        Err(e) => {
+                            error!("Error in websocket connection: {:?}", e);
+                            break; // Выход из цикла для переподключения
+                        }
+                    }
                 }
             }
         }
+    }
 
-        Ok(())
+    async fn connect_to_ws(&self) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Box<dyn std::error::Error>> { //======== Новый метод для упрощения переподключения
+        match connect_async(&self.url).await {
+            Ok((ws_stream, response)) => {
+                info!("WebSocket handshake has been successfully completed with response: {:?}", response);
+                Ok(ws_stream)
+            },
+            Err(e) => {
+                error!("Failed to establish websocket connection: {:?}", e);
+                Err(Box::new(e))
+            }
+        }
     }
 
     async fn subscribe_to_orders(
