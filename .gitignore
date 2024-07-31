@@ -1,4 +1,6 @@
 target/
+logfile
+pgsql-data/
 *.lock
 .env
 buysell.txt

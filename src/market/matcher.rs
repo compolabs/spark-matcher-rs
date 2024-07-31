@@ -1,219 +1,241 @@
-use crate::config::ev;
-use crate::model::{OrderType, SpotOrder};
-use crate::api::subscription::format_graphql_subscription;
-use anyhow::{Context, Result};
-use fuels::types::Bits256;
+use chrono::Utc;
+use fuels::programs::call_response::FuelCallResponse;
+use fuels::types::{Bits256, Bytes32};
 use fuels::{
     accounts::provider::Provider,
     accounts::wallet::WalletUnlocked,
-    crypto::SecretKey,
     types::ContractId,
+    crypto::SecretKey,
 };
-use futures_util::{SinkExt, StreamExt};
-use serde_json::Value;
+use log::{info, error};
+use sqlx::PgPool;
+use tokio::sync::mpsc;
+use tokio::time::Instant;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashSet};
+use std::str::FromStr;
+use std::sync::Arc;
+use crate::config::ev;
+use crate::logger::{log_transactions, TransactionLog};
+use crate::management::manager::OrderManager;
+use crate::model::{SpotOrder, OrderType};
+use crate::error::Error;
 use spark_market_sdk::MarketContract;
-use std::{str::FromStr, sync::Arc};
-use tokio::sync::Mutex;
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
-use url::Url;
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum Status {
-    Chill,
-}
-
-pub struct MatcherState {
-    buy_orders: Vec<SpotOrder>,
-    sell_orders: Vec<SpotOrder>,
-    market: MarketContract,
-}
 
 pub struct SparkMatcher {
-    state: Arc<Mutex<MatcherState>>,
-    client: Arc<Mutex<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>>,
+    pub order_manager: Arc<OrderManager>,
+    pub market: MarketContract,
+    pub log_sender: mpsc::UnboundedSender<TransactionLog>,
+    pub last_receive_time: Arc<tokio::sync::Mutex<Instant>>,
 }
 
 impl SparkMatcher {
-    pub async fn new(ws_url: Url) -> Result<Arc<Mutex<Self>>> {
-        let (socket, _) = connect_async(&ws_url).await.context("Failed to connect to WebSocket")?;
+    pub async fn new(order_manager: Arc<OrderManager>) -> Result<Self, Error> {
         let provider = Provider::connect("testnet.fuel.network").await?;
         let private_key = ev("PRIVATE_KEY")?;
         let contract_id = ev("CONTRACT_ID")?;
-        let wallet = WalletUnlocked::new_from_private_key(
-            SecretKey::from_str(&private_key)?,
-            Some(provider.clone()),
-        );
-        let market = MarketContract::new(ContractId::from_str(&contract_id).unwrap(), wallet).await;
+        let secret_key = SecretKey::from_str(&private_key).unwrap();
+        let wallet = WalletUnlocked::new_from_private_key(secret_key, Some(provider.clone()));
+        let market = MarketContract::new(ContractId::from_str(&contract_id)?, wallet).await;
 
-        let state = MatcherState {
-            buy_orders: Vec::new(),
-            sell_orders: Vec::new(),
-            market,
-        };
+        let database_url = ev("DATABASE_URL")?;
+        let db_pool = PgPool::connect(&database_url).await.unwrap();
 
-        Ok(Arc::new(Mutex::new(Self {
-            state: Arc::new(Mutex::new(state)),
-            client: Arc::new(Mutex::new(socket)),
-        })))
-    }
+            let (log_sender, log_receiver) = mpsc::unbounded_channel();
+            tokio::spawn(log_transactions(log_receiver, db_pool));
 
-    pub async fn run(&mut self) {
-        let mut client = self.client.lock().await;
+            Ok(Self {
+                order_manager,
+                market,
+                log_sender,
+                last_receive_time: Arc::new(tokio::sync::Mutex::new(Instant::now())),
+            })
+        }
 
-        client.send(Message::Text(r#"{"type": "connection_init"}"#.into())).await.expect("Failed to send init message");
+        pub async fn run(&self) -> Result<(), Error> {
+            loop {
+                if let Err(e) = self.match_orders().await {
+                    error!("Error during matching orders: {:?}", e);
+                }
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            }
+        }
 
-        let mut initialized = false;
-        while let Some(message) = client.next().await {
-            match message {
-                Ok(Message::Text(text)) => {
-                    if text.contains("connection_ack") && !initialized {
-                        println!("Connection established, subscribing to orders...");
-                        self.subscribe_to_orders(OrderType::Buy, &mut client).await;
-                        self.subscribe_to_orders(OrderType::Sell, &mut client).await;
-                        initialized = true;
-                    } else if text.contains("ka") {
-                        println!("Keep-alive message received.");
-                    } else {
-                        self.process_message(&text).await;
+        pub async fn match_orders(&self) -> Result<(), Error> {
+            let receive_time = {
+                let mut last_receive_time = self.last_receive_time.lock().await;
+                let duration = last_receive_time.elapsed();
+                *last_receive_time = Instant::now();
+                duration.as_millis() as i64
+            };
+
+            info!("-----Trying to match orders");
+
+            let match_start = Instant::now();
+            info!("Match start time: {:?}", match_start);
+
+            let mut buy_queue = BinaryHeap::new();
+            let mut sell_queue = BinaryHeap::new();
+
+
+
+            {
+                let buy_orders = self.order_manager.buy_orders.read().await;
+                for (_, orders) in buy_orders.iter() {
+                    for order in orders {
+                        buy_queue.push(order.clone());
                     }
-                },
-                Ok(_) => {},
-                Err(e) => {
-                    eprintln!("Error during receive: {:?}", e);
-                    break;
+                }
+
+                let sell_orders = self.order_manager.sell_orders.read().await;
+                for (_, orders) in sell_orders.iter() {
+                    for order in orders {
+                        sell_queue.push(Reverse(order.clone()));
+                    }
                 }
             }
-        }
-    }
 
-    async fn subscribe_to_orders(
-        &self,
-        order_type: OrderType,
-        client: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
-    ) {
-        let subscription_query = format_graphql_subscription(order_type);
-        let start_msg = serde_json::json!({
-            "id": format!("{}", order_type as u8),
-            "type": "start",
-            "payload": {
-                "query": subscription_query
-            }
-        })
-        .to_string();
-        client.send(Message::Text(start_msg)).await.expect("Failed to send subscription");
-    }
+            let mut matches: Vec<(String, String, u128)> = Vec::new();
+            let mut total_amount: u128 = 0;
 
-    async fn process_message(&self, message: &str) {
-        let data: Value = serde_json::from_str(message).unwrap();
-        if data["type"] == "data" {
-            let mut state = self.state.lock().await;
-            if let Some(array) = data["payload"]["data"]["Order"].as_array() {
-                state.buy_orders.extend(array.iter().filter_map(|v| {
-                    if v["order_type"] == "Buy" {
-                        serde_json::from_value(v.clone()).ok()
-                    } else {
-                        None
-                    }
-                }));
-
-                state.sell_orders.extend(array.iter().filter_map(|v| {
-                    if v["order_type"] == "Sell" {
-                        serde_json::from_value(v.clone()).ok()
-                    } else {
-                        None
-                    }
-                }));
-
-                self.match_orders(&mut state).await.expect("Failed to match orders");
-            }
-        }
-    }
-
-    async fn match_orders(&self, state: &mut MatcherState) -> Result<()> {
-        println!("Attempting to match orders...");
-
-        state.buy_orders.sort_by(|a, b| b.price.parse::<u128>().unwrap().cmp(&a.price.parse::<u128>().unwrap()));
-        state.sell_orders.sort_by(|a, b| a.price.parse::<u128>().unwrap().cmp(&b.price.parse::<u128>().unwrap()));
-
-        println!("-----------------------------------");
-        println!("buy_orders:{:?}",state.buy_orders);
-        println!("-----------------------------------");
-        println!("sell_orders:{:?}",state.buy_orders);
-        println!("-----------------------------------");
-
-        let mut buy_index = 0;
-        let mut sell_index = 0;
-        let mut matches = Vec::new();
-
-        while buy_index < state.buy_orders.len() && sell_index < state.sell_orders.len() {
-            let buy_order = &mut state.buy_orders[buy_index];
-            let sell_order = &mut state.sell_orders[sell_index];
-
-            if buy_order.price.parse::<u128>().unwrap() >= sell_order.price.parse::<u128>().unwrap() {
-                let buy_amount = buy_order.amount.parse::<u128>().unwrap();
-                let sell_amount = sell_order.amount.parse::<u128>().unwrap();
-                let match_amount = std::cmp::min(buy_amount, sell_amount);
-
-                buy_order.amount = (buy_amount - match_amount).to_string();
-                sell_order.amount = (sell_amount - match_amount).to_string();
-
-                println!("Matched: Buy order {} with Sell order {}, Amount {}", buy_order.id, sell_order.id, match_amount);
-
-                if match_amount > 0 {
+            while let (Some(mut buy_order), Some(Reverse(mut sell_order))) = (buy_queue.pop(), sell_queue.pop()) {
+                if buy_order.price >= sell_order.price {
+                    let match_amount = std::cmp::min(buy_order.amount, sell_order.amount);
                     matches.push((buy_order.id.clone(), sell_order.id.clone(), match_amount));
-                }
+                    total_amount += match_amount;
 
-                if buy_order.amount == "0" {
-                    buy_index += 1;
+                    buy_order.amount -= match_amount;
+                    sell_order.amount -= match_amount;
+
+                    if buy_order.amount > 0 {
+                        buy_queue.push(buy_order);
+                    }
+
+                    if sell_order.amount > 0 {
+                        sell_queue.push(Reverse(sell_order));
+                    }
+                } else {
+                    sell_queue.push(Reverse(sell_order));
                 }
-                if sell_order.amount == "0" {
-                    sell_index += 1;
-                }
-            } else {
-                sell_index += 1;
             }
-        }
 
-        if !matches.is_empty() {
-            post_matched_orders(&matches, &state.market).await?;
-        }
+            let match_duration = match_start.elapsed().as_millis() as i64;
+            info!("Match duration calculated: {}", match_duration);
 
-        state.buy_orders.retain(|order| order.amount.parse::<u128>().unwrap() > 0);
-        state.sell_orders.retain(|order| order.amount.parse::<u128>().unwrap() > 0);
+            let matches_len = matches.len();
+            if matches_len == 0 {
+                return Ok(());
+            }
+
+            let post_start = Instant::now();
+            info!("Post start time: {:?}", post_start);
+
+            let unique_order_ids: HashSet<String> = matches.iter()
+                .flat_map(|(buy_id, sell_id, _)| vec![buy_id.clone(), sell_id.clone()])
+                .collect();
+
+            let unique_bits256_ids: Vec<Bits256> = unique_order_ids
+                .iter()
+                .map(|id| Bits256::from_hex_str(id).unwrap())
+                .collect();
+/*
+            let formatted_log = self.format_order_info(
+                &matches.iter().map(|(buy_id, _, amount)| (buy_id.clone(), format!("Price: TBD"), *amount)).collect::<Vec<_>>(),
+                &matches.iter().map(|(_, sell_id, amount)| (sell_id.clone(), format!("Price: TBD"), *amount)).collect::<Vec<_>>()
+            );
+            info!("Matched Orders:\n{}", formatted_log);
+
+            let matches_human: Vec<String> = matches.clone()
+                .into_iter()
+                .flat_map(|(buy_id, sell_id, _)| vec![buy_id, sell_id])
+                .collect();
+
+            let matches: Vec<Bits256> = matches
+                .into_iter()
+                .flat_map(|(buy_id, sell_id, _)| vec![Bits256::from_hex_str(&buy_id).unwrap(), Bits256::from_hex_str(&sell_id).unwrap()])
+                .collect();
+*/
+            println!("=================================================");
+            println!("=================================================");
+            println!("matches {:?}",matches);
+            println!("=================================================");
+            println!("=================================================");
+            let res = self.market.match_order_many(unique_bits256_ids).await;
+            self.order_manager.clear_orders().await;
+            /*
+            let a = Bits256::from_hex_str("0x7e9927af85019fa02bc244477f72cb132a7a8b8ea6becf0e30f8a042de2f5397").unwrap();
+            let b = Bits256::from_hex_str("0x48b64d43c40f3a70617475d345bfd709c233e43e3c78e44be42efb77a849f8bd").unwrap();
+            
+            println!("=======================================");
+            println!("=======================================");
+            println!("=======================================");
+            let r = self.market.order(b).await.unwrap().value;
+            println!("{:?}", r);
+            let r1 = self.market.order_change_info(b).await.unwrap().value;
+            println!("=======================================");
+            //let r = self.market.order(b).await;
+            println!("{:?}", r1);
+            println!("=======================================");
+            println!("=======================================");
+            */
+           
+
+            
+
+            match res {
+                Ok(r) => {
+                    let post_duration = post_start.elapsed().as_millis() as i64;
+                    let log = TransactionLog {
+                        total_amount,
+                        matches_len,
+                        tx_id: r.tx_id.unwrap().to_string(),
+                        gas_used: r.gas_used,
+                        match_time_ms: match_duration,
+                    buy_orders: buy_queue.len(),
+                    sell_orders: sell_queue.len(),
+                    receive_time_ms: receive_time,
+                    post_time_ms: post_duration,
+                };
+                info!("Logging transaction: {:?}", log);
+                self.log_sender.send(log).unwrap();
+                info!(
+                    "✅✅✅ Matched {} orders\nhttps://app.fuel.network/tx/0x{}/simple\n",
+                    matches_len,
+                    r.tx_id.unwrap().to_string(),
+                );
+            }
+            Err(e) => {
+                error!("matching error `{}`\n", e);
+                return Err(Error::MatchOrdersError(e.to_string()));
+            }
+        };
 
         Ok(())
     }
 
-}
-
-async fn post_matched_orders(matches: &[(String, String, u128)], market: &MarketContract) -> Result<()> {
-    println!("Posting matched orders to the blockchain...");
-
-    let ids: Vec<Bits256> = matches.iter()
-        .map(|(buy_id, sell_id, _)| {
-            [buy_id, sell_id].iter().map(|id| Bits256::from_hex_str(id).unwrap()).collect::<Vec<_>>()
-        })
-        .flatten()
-        .collect();
-
-    if ids.is_empty() {
-        println!("No orders to post.");
-        return Ok(());
-    }
-    let ids_len = &ids.len();
-    println!("Attempting to post {} matched orders to the blockchain.", &ids_len); 
-
-    match market.match_order_many(ids).await {
-        Ok(result) => {
-            println!("Successfully matched orders. Transaction ID: https://app.fuel.network/tx/0x{}/simple", result.tx_id.unwrap());
-            println!("Total matched orders posted: {}", ids_len);
-            Ok(())
-        },
-        Err(e) => {
-            println!("Failed to match orders on the blockchain: {:?}", e);
-            println!("Transaction reverted. Continuing with next batch of orders.");
-            Ok(()) 
+   fn format_order_info(&self, buy_orders: &[(String, String, u128)], sell_orders: &[(String, String, u128)]) -> String {
+        let mut logs = Vec::new();
+        logs.push("🔵 Buy Orders:".to_string());
+        for (id, price, amount) in buy_orders {
+            logs.push(format!("ID: {}, Price: {}, Amount: {}", id, price, amount));
         }
+        logs.push("🔴 Sell Orders:".to_string());
+        for (id, price, amount) in sell_orders {
+            logs.push(format!("ID: {}, Price: {}, Amount: {}", id, price, amount));
+        }
+
+        logs.join("\n")
     }
 }
 
+impl OrderManager {
+    pub async fn get_all_orders(&self) -> (Vec<SpotOrder>, Vec<SpotOrder>) {
+        let buy_orders = self.buy_orders.read().await;
+        let sell_orders = self.sell_orders.read().await;
+
+        let buy_list = buy_orders.values().flat_map(|v| v.clone()).collect();
+        let sell_list = sell_orders.values().flat_map(|v| v.clone()).collect();
+
+        (buy_list, sell_list)
+    }
+}

@@ -1,6 +1,8 @@
-use anyhow::{Context, Result};
 use std::env;
 
-pub fn ev(key: &str) -> Result<String> {
-    env::var(key).context(format!("Environment variable {} not found", key))
+use crate::error::Error;
+
+
+pub fn ev(key: &str) -> Result<String, Error> {
+    env::var(key).map_err(Error::EnvVarError)
 }
