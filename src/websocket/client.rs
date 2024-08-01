@@ -45,12 +45,18 @@ impl WebSocketClient {
 
             let mut last_data_time = Instant::now();
             while let Some(message) = ws_stream.next().await {
+                if Instant::now().duration_since(last_data_time) > Duration::from_secs(60) {
+                        error!("No data messages received for the last 60 seconds, reconnecting...");
+                        break;
+                    }
                 match message {
                     Ok(Message::Text(text)) => {
                         if let Ok(response) = serde_json::from_str::<WebSocketResponse>(&text) {
                             match response.r#type.as_str() {
                                 "ka" => {
                                     info!("Received keep-alive message.");
+                                    let b = Instant::now().duration_since(last_data_time) ;
+                                    info!("time from last data: {:?}", b);
                                     continue;
                                 },
                                 "connection_ack" => {
@@ -83,10 +89,6 @@ impl WebSocketClient {
                     }
                 }
 
-                if Instant::now().duration_since(last_data_time) > Duration::from_secs(180) {
-                    error!("No data messages received for the last 180 seconds, reconnecting...");
-                    break; 
-                }
             }
 
             self.unsubscribe_orders(&mut ws_stream, OrderType::Buy).await?;
