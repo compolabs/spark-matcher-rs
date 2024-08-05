@@ -11,13 +11,13 @@ mod management;
 mod market;
 mod model;
 mod util;
-mod websocket;
 mod web;
+mod websocket;
 
-use management::manager::OrderManager;
-use websocket::client::WebSocketClient;
 use crate::error::Error;
+use management::manager::OrderManager;
 use url::Url;
+use websocket::client::WebSocketClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {

@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use rocket::{self, get, Route, State};
 use rocket::serde::json::Json;
-use rocket_okapi::{openapi, openapi_get_routes, JsonSchema};
-use rocket_okapi::swagger_ui::SwaggerUIConfig;
-use serde::Serialize;
+use rocket::{self, get, Route, State};
 use rocket_okapi::settings::UrlObject;
+use rocket_okapi::swagger_ui::SwaggerUIConfig;
+use rocket_okapi::{openapi, openapi_get_routes, JsonSchema};
+use serde::Serialize;
 use sqlx::types::BigDecimal;
 use sqlx::PgPool;
 use tokio::sync::RwLock;
@@ -61,11 +61,20 @@ async fn get_stats(db: &State<PgPool>) -> Json<StatsResponse> {
         total_transactions: row.total_transactions.unwrap_or(0),
         avg_gas_used: row.avg_gas_used.unwrap_or(BigDecimal::from(0)).to_string(),
         total_gas_used: row.total_gas_used.unwrap_or(0),
-        avg_match_time_ms: row.avg_match_time_ms.unwrap_or(BigDecimal::from(0)).to_string(),
+        avg_match_time_ms: row
+            .avg_match_time_ms
+            .unwrap_or(BigDecimal::from(0))
+            .to_string(),
         buy_orders: row.buy_orders.unwrap_or(0),
         sell_orders: row.sell_orders.unwrap_or(0),
-        avg_receive_time_ms: row.avg_receive_time_ms.unwrap_or(BigDecimal::from(0)).to_string(),
-        avg_post_time_ms: row.avg_post_time_ms.unwrap_or(BigDecimal::from(0)).to_string(),
+        avg_receive_time_ms: row
+            .avg_receive_time_ms
+            .unwrap_or(BigDecimal::from(0))
+            .to_string(),
+        avg_post_time_ms: row
+            .avg_post_time_ms
+            .unwrap_or(BigDecimal::from(0))
+            .to_string(),
     })
 }
 
@@ -80,28 +89,28 @@ async fn get_buy_orders(manager: &State<Arc<OrderManager>>) -> Json<OrdersRespon
 #[get("/orders/sell")]
 async fn get_sell_orders(manager: &State<Arc<OrderManager>>) -> Json<OrdersResponse> {
     let sell_orders = manager.get_all_sell_orders().await;
-    Json(OrdersResponse { orders: sell_orders })
+    Json(OrdersResponse {
+        orders: sell_orders,
+    })
 }
 
 #[openapi]
 #[get("/orders/all")]
 async fn get_all_orders(manager: &State<Arc<OrderManager>>) -> Json<CurrentOrdersResponse> {
     let (buy_orders, sell_orders) = manager.get_all_orders().await;
-    Json(CurrentOrdersResponse { buy_orders, sell_orders })
+    Json(CurrentOrdersResponse {
+        buy_orders,
+        sell_orders,
+    })
 }
 
 pub fn get_routes() -> Vec<Route> {
-    openapi_get_routes![
-        get_stats,
-        get_buy_orders,
-        get_sell_orders,
-        get_all_orders,
-    ]
+    openapi_get_routes![get_stats, get_buy_orders, get_sell_orders, get_all_orders,]
 }
 
 pub fn get_docs() -> SwaggerUIConfig {
     SwaggerUIConfig {
-        url: "/openapi.json".to_string(), 
+        url: "/openapi.json".to_string(),
         urls: vec![UrlObject::new("General", "/openapi.json")],
         ..Default::default()
     }

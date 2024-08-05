@@ -14,7 +14,10 @@ pub struct TransactionLog {
     pub post_time_ms: i64,
 }
 
-pub async fn log_transactions(mut receiver: mpsc::UnboundedReceiver<TransactionLog>, db_pool: PgPool) {
+pub async fn log_transactions(
+    mut receiver: mpsc::UnboundedReceiver<TransactionLog>,
+    db_pool: PgPool,
+) {
     while let Some(log) = receiver.recv().await {
         let total_amount = log.total_amount.to_string();
         let match_time_ms = log.match_time_ms;
