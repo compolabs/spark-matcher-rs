@@ -2,12 +2,10 @@ use crate::config::ev;
 use crate::error::Error;
 use crate::logger::{log_transactions, TransactionLog};
 use crate::management::manager::OrderManager;
-use crate::model::{OrderType, SpotOrder};
-use chrono::Utc;
-use fuels::programs::call_response::FuelCallResponse;
-use fuels::types::{Bits256, Bytes32};
+use crate::model::SpotOrder;
+use fuels::types::Bits256;
 use fuels::{
-    accounts::provider::Provider, accounts::wallet::WalletUnlocked, crypto::SecretKey,
+    accounts::provider::Provider, accounts::wallet::WalletUnlocked,
     types::ContractId,
 };
 use log::{error, info};
@@ -30,10 +28,10 @@ pub struct SparkMatcher {
 impl SparkMatcher {
     pub async fn new(order_manager: Arc<OrderManager>) -> Result<Self, Error> {
         let provider = Provider::connect("testnet.fuel.network").await?;
-        let private_key = ev("PRIVATE_KEY")?;
+        let mnemonic = ev("MNEMONIC")?;
         let contract_id = ev("CONTRACT_ID")?;
-        let secret_key = SecretKey::from_str(&private_key).unwrap();
-        let wallet = WalletUnlocked::new_from_private_key(secret_key, Some(provider.clone()));
+        let wallet =
+            WalletUnlocked::new_from_mnemonic_phrase(&mnemonic, Some(provider.clone())).unwrap();
         let market = MarketContract::new(ContractId::from_str(&contract_id)?, wallet).await;
 
         let database_url = ev("DATABASE_URL")?;
