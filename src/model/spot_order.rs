@@ -49,11 +49,14 @@ pub struct SpotOrderIndexer {
 }
 
 impl SpotOrder {
-    pub fn from_indexer(intermediate: SpotOrderIndexer) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_indexer(
+        intermediate: SpotOrderIndexer,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let amount = intermediate.amount.parse::<u128>()?;
         let price = intermediate.price.parse::<u128>()?;
-        let timestamp = chrono::DateTime::parse_from_rfc3339(&intermediate.timestamp)?.timestamp() as u64;
-        
+        let timestamp =
+            chrono::DateTime::parse_from_rfc3339(&intermediate.timestamp)?.timestamp() as u64;
+
         Ok(SpotOrder {
             id: intermediate.id,
             user: intermediate.user,

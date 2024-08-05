@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use rocket::{Rocket, Build};
+use rocket::{Build, Rocket};
 use rocket_okapi::swagger_ui::make_swagger_ui;
 use sqlx::PgPool;
 
-use crate::management::manager::OrderManager;
 use super::routes::{get_docs, get_routes};
+use crate::management::manager::OrderManager;
 
 pub fn rocket(db_pool: PgPool, order_manager: Arc<OrderManager>) -> Rocket<Build> {
     rocket::build()
