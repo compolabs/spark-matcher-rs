@@ -4,10 +4,7 @@ use crate::logger::{log_transactions, TransactionLog};
 use crate::management::manager::OrderManager;
 use crate::model::SpotOrder;
 use fuels::types::Bits256;
-use fuels::{
-    accounts::provider::Provider, accounts::wallet::WalletUnlocked,
-    types::ContractId,
-};
+use fuels::{accounts::provider::Provider, accounts::wallet::WalletUnlocked, types::ContractId};
 use log::{error, info};
 use spark_market_sdk::MarketContract;
 use sqlx::PgPool;

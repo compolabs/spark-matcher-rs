@@ -67,6 +67,7 @@ async fn main() -> Result<(), Error> {
     let _ = tokio::select! {
         _ = ws_task => { println!("WebSocket task finished"); },
         _ = manager_task => { println!("Order manager task finished"); },
+        _ = matcher_task => { println!("SparkMatcher task finished"); },
         _ = rocket_task => { println!("Rocket server task finished"); },
         _ = ctrl_c_task => { println!("Shutting down..."); },
     };
