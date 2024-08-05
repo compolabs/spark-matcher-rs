@@ -1,6 +1,8 @@
 { pkgs ? import <nixpkgs> {} }:
 
 let
+  lib = pkgs.lib;
+  isDarwin = pkgs.stdenv.isDarwin;
   merged-openssl = pkgs.symlinkJoin {
     name = "merged-openssl";
     paths = [ pkgs.openssl.out pkgs.openssl.dev ];
@@ -15,7 +17,10 @@ in pkgs.stdenv.mkDerivation rec {
     pkgs.cmake
     pkgs.postgresql
     pkgs.sqlx-cli
-  ];
+    pkgs.libiconv
+  ] ++ lib.optional isDarwin pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+    ++ lib.optional isDarwin pkgs.darwin.apple_sdk.frameworks.CoreFoundation
+    ++ lib.optional isDarwin pkgs.darwin.apple_sdk.frameworks.Security;
 
   shellHook = ''
     export OPENSSL_DIR="${merged-openssl}"
@@ -59,5 +64,5 @@ in pkgs.stdenv.mkDerivation rec {
     echo "Matcher environment is ready. Database URL: $DATABASE_URL"
   '';
 
-  LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.openssl ];
+  LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.openssl pkgs.libiconv ];
 }
