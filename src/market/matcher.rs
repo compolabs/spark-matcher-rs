@@ -23,6 +23,8 @@ pub struct SparkMatcher {
     pub last_receive_time: Arc<tokio::sync::Mutex<Instant>>,
     pub additional_wallets: Vec<WalletUnlocked>,
     pub wallet: WalletUnlocked,
+    pub provider: Provider, // Keep the provider for reuse
+    pub contract_id: ContractId, // Keep the contract_id for reuse
 }
 
 impl SparkMatcher {
@@ -31,9 +33,9 @@ impl SparkMatcher {
         let mnemonic = ev("MNEMONIC")?;
         let contract_id = ev("CONTRACT_ID")?;
 
-        let wallet =
-            WalletUnlocked::new_from_mnemonic_phrase(&mnemonic, Some(provider.clone())).unwrap();
-        let market = MarketContract::new(ContractId::from_str(&contract_id)?, wallet.clone()).await;
+        let wallet = WalletUnlocked::new_from_mnemonic_phrase(&mnemonic, Some(provider.clone())).unwrap();
+        let contract_id = ContractId::from_str(&contract_id)?;
+        let market = MarketContract::new(contract_id.clone(), wallet.clone()).await;
 
         let database_url = ev("DATABASE_URL")?;
         let db_pool = PgPool::connect(&database_url).await.unwrap();
@@ -44,23 +46,14 @@ impl SparkMatcher {
         let additional_wallets: Vec<WalletUnlocked> = (1..3)
             .map(|i| {
                 let path = format!("m/44'/60'/0'/0/{}", i);
-                WalletUnlocked::new_from_mnemonic_phrase_with_path(
-                    &mnemonic,
-                    Some(provider.clone()),
-                    &path,
-                )
-                .unwrap()
+                WalletUnlocked::new_from_mnemonic_phrase_with_path(&mnemonic, Some(provider.clone()), &path).unwrap()
             })
             .collect();
 
         // Log the public keys
         info!("Main wallet public key: {}", wallet.address().hash());
         for (i, additional_wallet) in additional_wallets.iter().enumerate() {
-            info!(
-                "Additional wallet {} public key: {}",
-                i + 1,
-                additional_wallet.address()
-            );
+            info!("Additional wallet {} public key: {}", i + 1, additional_wallet.address());
         }
 
         Ok(Self {
@@ -70,6 +63,8 @@ impl SparkMatcher {
             last_receive_time: Arc::new(tokio::sync::Mutex::new(Instant::now())),
             additional_wallets,
             wallet,
+            provider,
+            contract_id,
         })
     }
 
@@ -93,11 +88,7 @@ impl SparkMatcher {
         info!("-----Trying to match orders");
         info!("Main wallet public key: {}", self.wallet.address());
         for (i, additional_wallet) in self.additional_wallets.iter().enumerate() {
-            info!(
-                "Additional wallet {} public key: {}",
-                i + 1,
-                additional_wallet.address()
-            );
+            info!("Additional wallet {} public key: {}", i + 1, additional_wallet.address());
         }
 
         let match_start = Instant::now();
@@ -125,9 +116,7 @@ impl SparkMatcher {
         let mut matches: Vec<(String, String, u128)> = Vec::new();
         let mut total_amount: u128 = 0;
 
-        while let (Some(mut buy_order), Some(Reverse(mut sell_order))) =
-            (buy_queue.pop(), sell_queue.pop())
-        {
+        while let (Some(mut buy_order), Some(Reverse(mut sell_order))) = (buy_queue.pop(), sell_queue.pop()) {
             if buy_order.price >= sell_order.price {
                 let match_amount = std::cmp::min(buy_order.amount, sell_order.amount);
                 matches.push((buy_order.id.clone(), sell_order.id.clone(), match_amount));
@@ -166,10 +155,8 @@ impl SparkMatcher {
         println!("=================================================");
 
         // Split the matches and process in parallel with a maximum chunk size of 10
-        // Split the matches and process in parallel with a maximum chunk size of 10
-        let chunk_size = 2;
-        let chunks: Vec<Vec<(String, String, u128)>> =
-            matches.chunks(chunk_size).map(|c| c.to_vec()).collect();
+        let chunk_size = 10;
+        let chunks: Vec<Vec<(String, String, u128)>> = matches.chunks(chunk_size).map(|c| c.to_vec()).collect();
 
         let semaphore = Arc::new(Semaphore::new(3)); // Limit to 3 concurrent tasks
         let mut tasks = vec![];
@@ -178,16 +165,19 @@ impl SparkMatcher {
             let permit = Arc::clone(&semaphore).acquire_owned().await.unwrap();
 
             let market = if i == 0 {
-                self.market.clone()
+                MarketContract::new(self.contract_id.clone(), self.wallet.clone()).await
             } else if i <= self.additional_wallets.len() {
-                let contract_id = ev("CONTRACT_ID")?;
-                MarketContract::new(
-                    ContractId::from_str(&contract_id)?,
-                    self.additional_wallets[i - 1].clone(),
-                )
-                .await
+                MarketContract::new(self.contract_id.clone(), self.additional_wallets[i - 1].clone()).await
             } else {
-                self.market.clone() // Use the main market contract if there are no additional wallets
+                MarketContract::new(self.contract_id.clone(), self.wallet.clone()).await // Use the main wallet if there are no additional wallets
+            };
+
+            let wallet_public_key = if i == 0 {
+                self.wallet.address().to_string()
+            } else if i <= self.additional_wallets.len() {
+                self.additional_wallets[i - 1].address().to_string()
+            } else {
+                self.wallet.address().to_string()
             };
 
             // Convert match chunks to Bits256 IDs for market.match_order_many
@@ -208,9 +198,14 @@ impl SparkMatcher {
                 match market.match_order_many(chunk_bits256_ids).await {
                     Ok(_) => {
                         println!("MATCHED: {:?}", chunk);
+                        info!("✅✅✅ Matched orders\n");
                         Ok(())
                     }
-                    Err(e) => Err(e),
+                    Err(e) => {
+                        error!("Error matching orders with wallet {}: {:?}", wallet_public_key, e);
+
+                        Err(e)
+                    },
                 }
             });
 
@@ -237,7 +232,7 @@ impl SparkMatcher {
                     };
                     info!("Logging transaction: {:?}", log);
                     self.log_sender.send(log).unwrap();
-                    info!("✅✅✅ Matched {} orders\n", matches_len,);
+                    info!("✅✅✅ Matched {} orders\n", matches_len);
                 }
                 Ok(Err(e)) => {
                     error!("matching error `{}`\n", e);
