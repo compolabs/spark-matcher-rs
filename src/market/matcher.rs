@@ -5,6 +5,7 @@ use crate::management::manager::OrderManager;
 use crate::model::SpotOrder;
 use fuels::types::Bits256;
 use fuels::{accounts::provider::Provider, accounts::wallet::WalletUnlocked, types::ContractId};
+use futures_util::future::join_all;
 use log::{error, info};
 use spark_market_sdk::MarketContract;
 use sqlx::PgPool;
@@ -12,7 +13,7 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Semaphore};
 use tokio::time::Instant;
 
 pub struct SparkMatcher {
@@ -20,6 +21,8 @@ pub struct SparkMatcher {
     pub market: MarketContract,
     pub log_sender: mpsc::UnboundedSender<TransactionLog>,
     pub last_receive_time: Arc<tokio::sync::Mutex<Instant>>,
+    pub additional_wallets: Vec<WalletUnlocked>,
+    pub wallet: WalletUnlocked,
 }
 
 impl SparkMatcher {
@@ -27,9 +30,10 @@ impl SparkMatcher {
         let provider = Provider::connect("testnet.fuel.network").await?;
         let mnemonic = ev("MNEMONIC")?;
         let contract_id = ev("CONTRACT_ID")?;
+
         let wallet =
             WalletUnlocked::new_from_mnemonic_phrase(&mnemonic, Some(provider.clone())).unwrap();
-        let market = MarketContract::new(ContractId::from_str(&contract_id)?, wallet).await;
+        let market = MarketContract::new(ContractId::from_str(&contract_id)?, wallet.clone()).await;
 
         let database_url = ev("DATABASE_URL")?;
         let db_pool = PgPool::connect(&database_url).await.unwrap();
@@ -37,11 +41,35 @@ impl SparkMatcher {
         let (log_sender, log_receiver) = mpsc::unbounded_channel();
         tokio::spawn(log_transactions(log_receiver, db_pool));
 
+        let additional_wallets: Vec<WalletUnlocked> = (1..3)
+            .map(|i| {
+                let path = format!("m/44'/60'/0'/0/{}", i);
+                WalletUnlocked::new_from_mnemonic_phrase_with_path(
+                    &mnemonic,
+                    Some(provider.clone()),
+                    &path,
+                )
+                .unwrap()
+            })
+            .collect();
+
+        // Log the public keys
+        info!("Main wallet public key: {}", wallet.address().hash());
+        for (i, additional_wallet) in additional_wallets.iter().enumerate() {
+            info!(
+                "Additional wallet {} public key: {}",
+                i + 1,
+                additional_wallet.address()
+            );
+        }
+
         Ok(Self {
             order_manager,
             market,
             log_sender,
             last_receive_time: Arc::new(tokio::sync::Mutex::new(Instant::now())),
+            additional_wallets,
+            wallet,
         })
     }
 
@@ -63,6 +91,14 @@ impl SparkMatcher {
         };
 
         info!("-----Trying to match orders");
+        info!("Main wallet public key: {}", self.wallet.address());
+        for (i, additional_wallet) in self.additional_wallets.iter().enumerate() {
+            info!(
+                "Additional wallet {} public key: {}",
+                i + 1,
+                additional_wallet.address()
+            );
+        }
 
         let match_start = Instant::now();
         info!("Match start time: {:?}", match_start);
@@ -123,103 +159,98 @@ impl SparkMatcher {
         let post_start = Instant::now();
         info!("Post start time: {:?}", post_start);
 
-        let unique_order_ids: HashSet<String> = matches
-            .iter()
-            .flat_map(|(buy_id, sell_id, _)| vec![buy_id.clone(), sell_id.clone()])
-            .collect();
+        println!("=================================================");
+        println!("=================================================");
+        // println!("matches {:?}", matches);
+        println!("=================================================");
+        println!("=================================================");
 
-        let unique_bits256_ids: Vec<Bits256> = unique_order_ids
-            .iter()
-            .map(|id| Bits256::from_hex_str(id).unwrap())
-            .collect();
-        /*
-                    let formatted_log = self.format_order_info(
-                        &matches.iter().map(|(buy_id, _, amount)| (buy_id.clone(), format!("Price: TBD"), *amount)).collect::<Vec<_>>(),
-                        &matches.iter().map(|(_, sell_id, amount)| (sell_id.clone(), format!("Price: TBD"), *amount)).collect::<Vec<_>>()
-                    );
-                    info!("Matched Orders:\n{}", formatted_log);
+        // Split the matches and process in parallel with a maximum chunk size of 10
+        // Split the matches and process in parallel with a maximum chunk size of 10
+        let chunk_size = 2;
+        let chunks: Vec<Vec<(String, String, u128)>> =
+            matches.chunks(chunk_size).map(|c| c.to_vec()).collect();
 
-                    let matches_human: Vec<String> = matches.clone()
-                        .into_iter()
-                        .flat_map(|(buy_id, sell_id, _)| vec![buy_id, sell_id])
-                        .collect();
+        let semaphore = Arc::new(Semaphore::new(3)); // Limit to 3 concurrent tasks
+        let mut tasks = vec![];
 
-                    let matches: Vec<Bits256> = matches
-                        .into_iter()
-                        .flat_map(|(buy_id, sell_id, _)| vec![Bits256::from_hex_str(&buy_id).unwrap(), Bits256::from_hex_str(&sell_id).unwrap()])
-                        .collect();
-        */
-        println!("=================================================");
-        println!("=================================================");
-        println!("matches {:?}", matches);
-        println!("=================================================");
-        println!("=================================================");
-        let res = self.market.match_order_many(unique_bits256_ids).await;
+        for (i, chunk) in chunks.into_iter().enumerate() {
+            let permit = Arc::clone(&semaphore).acquire_owned().await.unwrap();
+
+            let market = if i == 0 {
+                self.market.clone()
+            } else if i <= self.additional_wallets.len() {
+                let contract_id = ev("CONTRACT_ID")?;
+                MarketContract::new(
+                    ContractId::from_str(&contract_id)?,
+                    self.additional_wallets[i - 1].clone(),
+                )
+                .await
+            } else {
+                self.market.clone() // Use the main market contract if there are no additional wallets
+            };
+
+            // Convert match chunks to Bits256 IDs for market.match_order_many
+            let chunk_bits256_ids: Vec<Bits256> = chunk
+                .iter()
+                .flat_map(|(buy_id, sell_id, _)| {
+                    vec![
+                        Bits256::from_hex_str(buy_id).unwrap(),
+                        Bits256::from_hex_str(sell_id).unwrap(),
+                    ]
+                })
+                .collect();
+
+            println!("MATCHING: {:?}", chunk);
+
+            let task = tokio::spawn(async move {
+                let _permit = permit; // Hold permit until task is done
+                match market.match_order_many(chunk_bits256_ids).await {
+                    Ok(_) => {
+                        println!("MATCHED: {:?}", chunk);
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                }
+            });
+
+            tasks.push(task);
+        }
+
+        let results = join_all(tasks).await;
         self.order_manager.clear_orders().await;
-        /*
-        let a = Bits256::from_hex_str("0x7e9927af85019fa02bc244477f72cb132a7a8b8ea6becf0e30f8a042de2f5397").unwrap();
-        let b = Bits256::from_hex_str("0x48b64d43c40f3a70617475d345bfd709c233e43e3c78e44be42efb77a849f8bd").unwrap();
 
-        println!("=======================================");
-        println!("=======================================");
-        println!("=======================================");
-        let r = self.market.order(b).await.unwrap().value;
-        println!("{:?}", r);
-        let r1 = self.market.order_change_info(b).await.unwrap().value;
-        println!("=======================================");
-        //let r = self.market.order(b).await;
-        println!("{:?}", r1);
-        println!("=======================================");
-        println!("=======================================");
-        */
-
-        match res {
-            Ok(r) => {
-                let post_duration = post_start.elapsed().as_millis() as i64;
-                let log = TransactionLog {
-                    total_amount,
-                    matches_len,
-                    tx_id: r.tx_id.unwrap().to_string(),
-                    gas_used: r.gas_used,
-                    match_time_ms: match_duration,
-                    buy_orders: buy_queue.len(),
-                    sell_orders: sell_queue.len(),
-                    receive_time_ms: receive_time,
-                    post_time_ms: post_duration,
-                };
-                info!("Logging transaction: {:?}", log);
-                self.log_sender.send(log).unwrap();
-                info!(
-                    "✅✅✅ Matched {} orders\nhttps://app.fuel.network/tx/0x{}/simple\n",
-                    matches_len,
-                    r.tx_id.unwrap().to_string(),
-                );
+        for result in results {
+            match result {
+                Ok(Ok(())) => {
+                    let post_duration = post_start.elapsed().as_millis() as i64;
+                    let log = TransactionLog {
+                        total_amount,
+                        matches_len,
+                        tx_id: String::new(), // Since tx_id is not available
+                        gas_used: 0,          // Since gas_used is not available
+                        match_time_ms: match_duration,
+                        buy_orders: buy_queue.len(),
+                        sell_orders: sell_queue.len(),
+                        receive_time_ms: receive_time,
+                        post_time_ms: post_duration,
+                    };
+                    info!("Logging transaction: {:?}", log);
+                    self.log_sender.send(log).unwrap();
+                    info!("✅✅✅ Matched {} orders\n", matches_len,);
+                }
+                Ok(Err(e)) => {
+                    error!("matching error `{}`\n", e);
+                    return Err(Error::MatchOrdersError(e.to_string()));
+                }
+                Err(e) => {
+                    error!("task join error `{}`\n", e);
+                    return Err(Error::MatchOrdersError(e.to_string()));
+                }
             }
-            Err(e) => {
-                error!("matching error `{}`\n", e);
-                return Err(Error::MatchOrdersError(e.to_string()));
-            }
-        };
+        }
 
         Ok(())
-    }
-
-    fn format_order_info(
-        &self,
-        buy_orders: &[(String, String, u128)],
-        sell_orders: &[(String, String, u128)],
-    ) -> String {
-        let mut logs = Vec::new();
-        logs.push("🔵 Buy Orders:".to_string());
-        for (id, price, amount) in buy_orders {
-            logs.push(format!("ID: {}, Price: {}, Amount: {}", id, price, amount));
-        }
-        logs.push("🔴 Sell Orders:".to_string());
-        for (id, price, amount) in sell_orders {
-            logs.push(format!("ID: {}, Price: {}, Amount: {}", id, price, amount));
-        }
-
-        logs.join("\n")
     }
 }
 
