@@ -1,8 +1,8 @@
-use crate::config::ev;
+/* use crate::config::ev;
 use chrono::Local;
 use fern::Dispatch;
 use log::LevelFilter;
-use std::fs::OpenOptions;
+use std::fs::OpenOptions; */
 /*
 pub fn log_level(level_str: &str) -> Result<LevelFilter> {
     match level_str {

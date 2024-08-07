@@ -1,10 +1,9 @@
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info};
-use serde_json::Value;
 use tokio::{
     net::TcpStream,
     sync::mpsc,
-    time::{self, Duration, Instant},
+    time::{Duration, Instant},
 };
 use tokio_tungstenite::{
     connect_async, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
@@ -13,10 +12,7 @@ use url::Url;
 
 use crate::{
     api::subscription::format_graphql_subscription,
-    model::{
-        spot_order::{SpotOrderIndexer, WebSocketResponse},
-        OrderType, SpotOrder,
-    },
+    model::{spot_order::WebSocketResponse, OrderType, SpotOrder},
 };
 
 pub struct WebSocketClient {

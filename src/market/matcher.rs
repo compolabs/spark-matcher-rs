@@ -10,7 +10,7 @@ use log::{error, info};
 use spark_market_sdk::MarketContract;
 use sqlx::PgPool;
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashSet};
+use std::collections::BinaryHeap;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Semaphore};
@@ -22,9 +22,9 @@ pub struct SparkMatcher {
     pub log_sender: mpsc::UnboundedSender<TransactionLog>,
     pub last_receive_time: Arc<tokio::sync::Mutex<Instant>>,
     pub additional_wallets: Vec<WalletUnlocked>,
-    pub wallet: WalletUnlocked,
-    pub provider: Provider,      // Keep the provider for reuse
-    pub contract_id: ContractId, // Keep the contract_id for reuse
+    pub main_wallet: WalletUnlocked,
+    pub provider: Provider,
+    pub contract_id: ContractId,
 }
 
 impl SparkMatcher {
@@ -33,10 +33,10 @@ impl SparkMatcher {
         let mnemonic = ev("MNEMONIC")?;
         let contract_id = ev("CONTRACT_ID")?;
 
-        let wallet =
+        let main_wallet =
             WalletUnlocked::new_from_mnemonic_phrase(&mnemonic, Some(provider.clone())).unwrap();
         let contract_id = ContractId::from_str(&contract_id)?;
-        let market = MarketContract::new(contract_id.clone(), wallet.clone()).await;
+        let market = MarketContract::new(contract_id.clone(), main_wallet.clone()).await;
 
         let database_url = ev("DATABASE_URL")?;
         let db_pool = PgPool::connect(&database_url).await.unwrap();
@@ -44,7 +44,9 @@ impl SparkMatcher {
         let (log_sender, log_receiver) = mpsc::unbounded_channel();
         tokio::spawn(log_transactions(log_receiver, db_pool));
 
-        let additional_wallets: Vec<WalletUnlocked> = (0..3)
+        // number of wallets in addition to wallet from new_from_mnemonic_phrase()
+        let number_of_wallets = 3;
+        let additional_wallets: Vec<WalletUnlocked> = (1..number_of_wallets)
             .map(|i| {
                 // m/44'/1179993420'/{n}'/0/0
                 // https://github.com/FuelLabs/fuels-ts/blob/4e82ad42b84e520c3133907aabeea2aad1c1a199/packages/account/src/wallet-manager/vaults/mnemonic-vault.ts#L21
@@ -67,7 +69,7 @@ impl SparkMatcher {
             .collect();
 
         // Log the public keys
-        info!("Main wallet public key: {}", wallet.address().hash());
+        info!("Main wallet public key: {}", main_wallet.address().hash());
         for (i, additional_wallet) in additional_wallets.iter().enumerate() {
             info!(
                 "Additional wallet {} public key: {}",
@@ -82,7 +84,7 @@ impl SparkMatcher {
             log_sender,
             last_receive_time: Arc::new(tokio::sync::Mutex::new(Instant::now())),
             additional_wallets,
-            wallet,
+            main_wallet,
             provider,
             contract_id,
         })
@@ -106,17 +108,16 @@ impl SparkMatcher {
         };
 
         info!("-----Trying to match orders");
-        info!("Main wallet public key: {}", self.wallet.address());
         for (i, additional_wallet) in self.additional_wallets.iter().enumerate() {
             info!(
-                "Additional wallet {} public key: {}",
+                "Wallet #{} public key: {}",
                 i + 1,
                 additional_wallet.address()
             );
         }
 
         let match_start = Instant::now();
-        info!("Match start time: {:?}", match_start);
+        // info!("Match start time: {:?}", match_start);
 
         let mut buy_queue = BinaryHeap::new();
         let mut sell_queue = BinaryHeap::new();
@@ -164,7 +165,7 @@ impl SparkMatcher {
         }
 
         let match_duration = match_start.elapsed().as_millis() as i64;
-        info!("Match duration calculated: {}", match_duration);
+        info!("Match duration: {}", match_duration);
 
         let matches_len = matches.len();
         if matches_len == 0 {
@@ -172,16 +173,9 @@ impl SparkMatcher {
         }
 
         let post_start = Instant::now();
-        info!("Post start time: {:?}", post_start);
+        // info!("Post start time: {:?}", post_start);
 
-        println!("=================================================");
-        println!("=================================================");
-        // println!("matches {:?}", matches);
-        println!("=================================================");
-        println!("=================================================");
-
-        // Split the matches and process in parallel with a maximum chunk size of 10
-        let chunk_size = 10;
+        let chunk_size = 20;
         let chunks: Vec<Vec<(String, String, u128)>> =
             matches.chunks(chunk_size).map(|c| c.to_vec()).collect();
 
@@ -192,7 +186,7 @@ impl SparkMatcher {
             let permit = Arc::clone(&semaphore).acquire_owned().await.unwrap();
 
             let market = if i == 0 {
-                MarketContract::new(self.contract_id.clone(), self.wallet.clone()).await
+                MarketContract::new(self.contract_id.clone(), self.main_wallet.clone()).await
             } else if i <= self.additional_wallets.len() {
                 MarketContract::new(
                     self.contract_id.clone(),
@@ -200,16 +194,16 @@ impl SparkMatcher {
                 )
                 .await
             } else {
-                // no more wallets, break out of for loop
+                // No more wallets, break out of for loop
                 break;
             };
 
             let wallet_public_key = if i == 0 {
-                self.wallet.address().to_string()
+                self.main_wallet.address().to_string()
             } else if i <= self.additional_wallets.len() {
                 self.additional_wallets[i - 1].address().to_string()
             } else {
-                self.wallet.address().to_string()
+                self.main_wallet.address().to_string()
             };
 
             // Convert match chunks to Bits256 IDs for market.match_order_many
@@ -217,20 +211,21 @@ impl SparkMatcher {
                 .iter()
                 .flat_map(|(buy_id, sell_id, _)| {
                     vec![
-                        Bits256::from_hex_str(buy_id).unwrap(),
-                        Bits256::from_hex_str(sell_id).unwrap(),
+                        Bits256::from_hex_str(buy_id).expect("Invalid buy ID format"),
+                        Bits256::from_hex_str(sell_id).expect("Invalid sell ID format"),
                     ]
                 })
                 .collect();
 
-            println!("MATCHING: {:?}", chunk);
+            println!("SUBMITTING ORDERS: {:?}", chunk);
 
             let task = tokio::spawn(async move {
                 let _permit = permit; // Hold permit until task is done
                 match market.match_order_many(chunk_bits256_ids).await {
                     Ok(_) => {
-                        println!("MATCHED: {:?}", chunk);
-                        info!("✅✅✅ Matched orders\n");
+                        println!("ORDERS MATCHED: {:?}\n", chunk);
+                        println!("Public Key used: {:?}", wallet_public_key);
+                        info!("✅✅ Orders Matched ✅✅\n");
                         Ok(())
                     }
                     Err(e) => {
@@ -238,7 +233,6 @@ impl SparkMatcher {
                             "Error matching orders with wallet {}: {:?}",
                             wallet_public_key, e
                         );
-
                         Err(e)
                     }
                 }
