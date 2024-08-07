@@ -46,10 +46,9 @@ impl SparkMatcher {
 
         let additional_wallets: Vec<WalletUnlocked> = (0..3)
             .map(|i| {
-                // m/44'/1179993420'/0'/0/0
-                // m/44'/1179993420'/0'/0/1
-                // m/44'/1179993420'/0'/0/2
-                let path = format!("m/44'/1179993420'/0'/0/{}", i);
+                // m/44'/1179993420'/{n}'/0/0
+                // https://github.com/FuelLabs/fuels-ts/blob/4e82ad42b84e520c3133907aabeea2aad1c1a199/packages/account/src/wallet-manager/vaults/mnemonic-vault.ts#L21
+                let path = format!("m/44'/1179993420'/{}'/0/0", i);
                 println!("path {}", path);
                 let address = WalletUnlocked::new_from_mnemonic_phrase_with_path(
                     &mnemonic,
