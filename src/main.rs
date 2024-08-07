@@ -22,6 +22,7 @@ use websocket::client::WebSocketClient;
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     dotenv::dotenv().ok();
+    // env_logger::init(); // Initialize the logger
 
     let ws_url = Url::parse(&config::ev("WEBSOCKET_URL")?)?;
 
