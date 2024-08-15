@@ -12,16 +12,16 @@ COPY --from=builder /usr/src/matcher/target/release/matcher /usr/local/bin/match
 
 ENV NODE_ENV=development \
     PORT=5003 \
-    CONTRACT_ID="lalala" \
-    INDEXER_URL="http://13.49.144.58:8080/v1/graphql" \
     WEBSOCKET_URL="ws://localhost:8080/v1/graphql" \
-    FETCH_ORDER_LIMIT=14 \
-    MARKET="BTC" \
     LOG_FILE="matcher.log" \
     FILE_LOG_LEVEL="debug" \
     CONSOLE_LOG_LEVEL="info" \
+    FETCH_ORDER_LIMIT=14 \
+    MARKET="BTC" \
     MAX_FAIL_COUNT=3 \
-    PRIVATE_KEY="lalala2"
+    PRIVATE_KEY="lalala2" \
+    MNEMONIC="your mnemonic"  \
+    CONTRACT_ID="lalala"
 
 EXPOSE 5003
 
