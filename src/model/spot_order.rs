@@ -46,6 +46,10 @@ pub struct SpotOrderIndexer {
     pub price: String,
     pub timestamp: String,
     pub order_type: OrderType,
+    pub status: Option<String>,          // Новое поле
+    pub asset_type: Option<String>,      // Новое поле
+    pub db_write_timestamp: Option<String>, // Новое поле
+    pub initial_amount: Option<String>,  // Новое поле
 }
 
 impl SpotOrder {
@@ -71,7 +75,11 @@ impl SpotOrder {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct OrderPayload {
-    pub Order: Vec<SpotOrderIndexer>,
+    #[serde(rename = "ActiveBuyOrder")]
+    pub active_buy_order: Option<Vec<SpotOrderIndexer>>,
+    
+    #[serde(rename = "ActiveSellOrder")]
+    pub active_sell_order: Option<Vec<SpotOrderIndexer>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

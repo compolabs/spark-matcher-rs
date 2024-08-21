@@ -81,15 +81,22 @@ impl WebSocketClient {
                                     }
                                 }
                                 "data" => {
-                                    if let Some(payload) = response.payload {
-                                        for order_indexer in payload.data.Order {
-                                            let spot_order =
-                                                SpotOrder::from_indexer(order_indexer)?;
-                                            sender.send(spot_order).await?;
+                                        if let Some(payload) = response.payload {
+                                            if let Some(orders) = payload.data.active_buy_order {
+                                                for order_indexer in orders {
+                                                    let spot_order = SpotOrder::from_indexer(order_indexer)?;
+                                                    sender.send(spot_order).await?;
+                                                }
+                                            }
+                                            if let Some(orders) = payload.data.active_sell_order {
+                                                for order_indexer in orders {
+                                                    let spot_order = SpotOrder::from_indexer(order_indexer)?;
+                                                    sender.send(spot_order).await?;
+                                                }
+                                            }
+                                            last_data_time = Instant::now();
                                         }
-                                        last_data_time = Instant::now();
                                     }
-                                }
                                 _ => {}
                             }
                         } else {
