@@ -11,6 +11,7 @@ ctrlc = "3.4"
 dotenv = "0.15.0"
 fern = "0.6.2"
 fuels = { version = "0.65.1", features = ["fuel-core-lib"] }
+fuel-types = "0.56.0"
 fuel-crypto = "0.55.0"
 futures-util = "0.3"
 hex = "0.4"
@@ -27,7 +28,8 @@ url = "2.3.1"
 schemars = "0.8.0"
 rocket_okapi = { version = "0.8.0-rc.2", features = ["swagger", "rapidoc"] }
 
-spark-market-sdk = { git = "https://github.com/compolabs/orderbook-contract.git", branch = "master", package = "spark-market-sdk" }
+spark-market-sdk = { git = "https://github.com/compolabs/orderbook-contract.git", rev = "27ec4b3b8869fef20c050e8d512b1bcea0165e08", package = "spark-market-sdk" }
+superchain_client = { path = "../superchain_client"}
 
 
 [[bin]]

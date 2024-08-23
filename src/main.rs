@@ -2,6 +2,7 @@ use market::SparkMatcher;
 use sqlx::PgPool;
 use tokio::signal;
 use tokio::sync::mpsc;
+use websocket::clients::superchain::WebSocketClientSuperchain;
 
 mod api;
 mod config;
@@ -17,15 +18,17 @@ mod websocket;
 use crate::error::Error;
 use management::manager::OrderManager;
 use url::Url;
-use websocket::client::WebSocketClient;
+use websocket::clients::envio::WebSocketClientEnvio;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     dotenv::dotenv().ok();
 
     let ws_url = Url::parse(&config::ev("WEBSOCKET_URL")?)?;
+    let ws_superchain_url = "fuel.beta.superchain.network".to_owned();
 
-    let websocket_client = WebSocketClient::new(ws_url);
+    let websocket_client_envio= WebSocketClientEnvio::new(ws_url);
+    let websocket_client_superchain= WebSocketClientSuperchain::new(ws_superchain_url);
     let order_manager = OrderManager::new();
     let arc_order_manager = order_manager.clone();
 
@@ -37,7 +40,7 @@ async fn main() -> Result<(), Error> {
     let (tx, mut rx) = mpsc::channel(100);
 
     let ws_task = tokio::spawn(async move {
-        if let Err(e) = websocket_client.connect(tx).await {
+        if let Err(e) = websocket_client_superchain.connect().await {
             eprintln!("WebSocket error: {}", e);
         }
     });
