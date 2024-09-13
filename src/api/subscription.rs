@@ -19,7 +19,6 @@ pub fn format_graphql_subscription(order_type: OrderType) -> String {
                 asset
                 price
                 status
-                asset_type
                 db_write_timestamp
                 initial_amount
             }}

@@ -16,7 +16,7 @@ pub struct TransactionLog {
 
 pub async fn log_transactions(
     mut receiver: mpsc::UnboundedReceiver<TransactionLog>,
-    db_pool: PgPool,
+    // db_pool: PgPool,
 ) {
     while let Some(log) = receiver.recv().await {
         let total_amount = log.total_amount.to_string();
@@ -28,23 +28,23 @@ pub async fn log_transactions(
         let receive_time_ms = log.receive_time_ms;
         let post_time_ms = log.post_time_ms;
 
-        sqlx::query!(
-            r#"
-            INSERT INTO transaction_stats (total_transactions, total_amount, avg_gas_used, total_gas_used, match_time_ms, buy_orders, sell_orders, receive_time_ms, post_time_ms)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            "#,
-            log.matches_len as i32,
-            total_amount,
-            avg_gas_used,
-            total_gas_used,
-            match_time_ms,
-            buy_orders,
-            sell_orders,
-            receive_time_ms,
-            post_time_ms
-        )
-        .execute(&db_pool)
-        .await
-        .expect("Failed to log transaction");
+        // sqlx::query!(
+        //     r#"
+        //     INSERT INTO transaction_stats (total_transactions, total_amount, avg_gas_used, total_gas_used, match_time_ms, buy_orders, sell_orders, receive_time_ms, post_time_ms)
+        //     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        //     "#,
+        //     log.matches_len as i32,
+        //     total_amount,
+        //     avg_gas_used,
+        //     total_gas_used,
+        //     match_time_ms,
+        //     buy_orders,
+        //     sell_orders,
+        //     receive_time_ms,
+        //     post_time_ms
+        // )
+        // .execute(&db_pool)
+        // .await
+        // .expect("Failed to log transaction");
     }
 }

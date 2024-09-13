@@ -1,7 +1,8 @@
-use market::SparkMatcher;
-use sqlx::PgPool;
+use market::{Bot, SparkMatcher};
+use random::random_generator::RandomGenerator;
 use tokio::signal;
 use tokio::sync::mpsc;
+mod random;
 
 mod api;
 mod config;
@@ -28,11 +29,11 @@ async fn main() -> Result<(), Error> {
     let websocket_client = WebSocketClient::new(ws_url);
     let order_manager = OrderManager::new();
     let arc_order_manager = order_manager.clone();
+    let random_generator = RandomGenerator::new();
 
-    let database_url = config::ev("DATABASE_URL")?;
-    let db_pool = PgPool::connect(&database_url).await.unwrap();
+    let bot = Bot::new(arc_order_manager.clone(), random_generator.clone()).await?;
 
-    let spark_matcher = SparkMatcher::new(arc_order_manager.clone()).await?;
+    // let spark_matcher = SparkMatcher::new(arc_order_manager.clone()).await?;
 
     let (tx, mut rx) = mpsc::channel(100);
 
@@ -42,20 +43,26 @@ async fn main() -> Result<(), Error> {
         }
     });
 
+    let bot_task = tokio::spawn(async move {
+        if let Err(e) = bot.run().await {
+            eprintln!("Bot error: {}", e);
+        }
+    });
+
     let manager_task = tokio::spawn(async move {
         while let Some(order) = rx.recv().await {
             order_manager.add_order(order).await;
         }
     });
 
-    let matcher_task = tokio::spawn(async move {
-        if let Err(e) = spark_matcher.run().await {
-            eprintln!("SparkMatcher error: {}", e);
-        }
-    });
+    // let matcher_task = tokio::spawn(async move {
+    //     if let Err(e) = spark_matcher.run().await {
+    //         eprintln!("SparkMatcher error: {}", e);
+    //     }
+    // });
 
     let rocket_task = tokio::spawn(async {
-        let rocket = web::server::rocket(db_pool, arc_order_manager);
+        let rocket = web::server::rocket(arc_order_manager);
         let _ = rocket.launch().await;
     });
 
@@ -67,7 +74,8 @@ async fn main() -> Result<(), Error> {
     let _ = tokio::select! {
         _ = ws_task => { println!("WebSocket task finished"); },
         _ = manager_task => { println!("Order manager task finished"); },
-        _ = matcher_task => { println!("SparkMatcher task finished"); },
+        _ = bot_task => { println!("Bot task finished"); },
+        // _ = matcher_task => { println!("SparkMatcher task finished"); },
         _ = rocket_task => { println!("Rocket server task finished"); },
         _ = ctrl_c_task => { println!("Shutting down..."); },
     };

@@ -6,7 +6,8 @@ use crate::model::SpotOrder;
 use fuels::types::Bits256;
 use fuels::{accounts::provider::Provider, accounts::wallet::WalletUnlocked, types::ContractId};
 use log::{error, info};
-use spark_market_sdk::MarketContract;
+use spark_market_sdk::SparkMarketContract;
+// use spark_market_sdk::SparkMarketContract;
 use sqlx::PgPool;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
@@ -17,7 +18,7 @@ use tokio::time::Instant;
 
 pub struct SparkMatcher {
     pub order_manager: Arc<OrderManager>,
-    pub market: MarketContract,
+    pub market: SparkMarketContract,
     pub log_sender: mpsc::UnboundedSender<TransactionLog>,
     pub last_receive_time: Arc<tokio::sync::Mutex<Instant>>,
 }
@@ -26,16 +27,16 @@ impl SparkMatcher {
     pub async fn new(order_manager: Arc<OrderManager>) -> Result<Self, Error> {
         let provider = Provider::connect("testnet.fuel.network").await?;
         let mnemonic = ev("MNEMONIC")?;
-        let contract_id = ev("CONTRACT_ID")?;
+        let contract_id = ev("BTC_USDC_MARKET_ID")?;
         let wallet =
             WalletUnlocked::new_from_mnemonic_phrase(&mnemonic, Some(provider.clone())).unwrap();
-        let market = MarketContract::new(ContractId::from_str(&contract_id)?, wallet).await;
+        let market = SparkMarketContract::new(ContractId::from_str(&contract_id)?, wallet).await;
 
-        let database_url = ev("DATABASE_URL")?;
-        let db_pool = PgPool::connect(&database_url).await.unwrap();
+        // let database_url = ev("DATABASE_URL")?;
+        // let db_pool = PgPool::connect(&database_url).await.unwrap();
 
         let (log_sender, log_receiver) = mpsc::unbounded_channel();
-        tokio::spawn(log_transactions(log_receiver, db_pool));
+        tokio::spawn(log_transactions(log_receiver));
 
         Ok(Self {
             order_manager,
@@ -85,6 +86,7 @@ impl SparkMatcher {
                 }
             }
         }
+        println!("buy_orders = {:#?}", buy_queue.len());
 
         let mut matches: Vec<(String, String, u128)> = Vec::new();
         let mut total_amount: u128 = 0;
