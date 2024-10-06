@@ -10,8 +10,9 @@ chrono = "0.4.38"
 ctrlc = "3.4"
 dotenv = "0.15.0"
 fern = "0.6.2"
-fuels = { version = "0.65.1", features = ["fuel-core-lib"] }
-fuel-crypto = "0.55.0"
+fuels = { version = "0.66.5", features = ["fuel-core-lib"] }
+#fuels = "0.66.5"
+fuel-crypto = "0.57.1"
 futures-util = "0.3"
 hex = "0.4"
 itertools = "0.13.0"
@@ -27,7 +28,7 @@ url = "2.3.1"
 schemars = "0.8.0"
 rocket_okapi = { version = "0.8.0-rc.2", features = ["swagger", "rapidoc"] }
 
-spark-market-sdk = { git = "https://github.com/compolabs/orderbook-contract.git", branch = "master", package = "spark-market-sdk" }
+spark-market-sdk = "0.5.1" 
 
 
 [[bin]]

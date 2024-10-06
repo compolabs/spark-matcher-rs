@@ -1,16 +1,21 @@
+
 use crate::config::ev;
 use crate::model::OrderType;
 
+
+use log::info;
+
 pub fn format_graphql_subscription(order_type: OrderType) -> String {
     let limit = ev("FETCH_ORDER_LIMIT").unwrap_or_default();
+    let market = ev("CONTRACT_ID").unwrap_or_default();  
     let order_type_str = match order_type {
         OrderType::Sell => "ActiveSellOrder",
         OrderType::Buy => "ActiveBuyOrder",
     };
 
-    format!(
+    let qe = format!(
         r#"query MyQuery {{
-            {}(limit: {}) {{
+            {}(limit: {}, where: {{market: {{_eq: "{}"}}}}) {{
                 id
                 user
                 timestamp
@@ -19,11 +24,16 @@ pub fn format_graphql_subscription(order_type: OrderType) -> String {
                 asset
                 price
                 status
-                asset_type
                 db_write_timestamp
                 initial_amount
             }}
         }}"#,
-        order_type_str, limit
-    )
+        order_type_str, limit, market
+    );
+    info!("debug query");
+    info!("=======");
+    info!("{:?}", &qe);
+    info!("=======");
+    qe
 }
+

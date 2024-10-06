@@ -56,8 +56,8 @@ impl WebSocketClient {
 
             let mut last_data_time = Instant::now();
             while let Some(message) = ws_stream.next().await {
-                if Instant::now().duration_since(last_data_time) > Duration::from_secs(60) {
-                    error!("No data messages received for the last 60 seconds, reconnecting...");
+                if Instant::now().duration_since(last_data_time) > Duration::from_secs(20) {
+                    error!("No data messages received for the last 20 seconds, reconnecting...");
                     break;
                 }
                 match message {

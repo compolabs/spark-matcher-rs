@@ -6,7 +6,7 @@ use crate::model::SpotOrder;
 use fuels::types::Bits256;
 use fuels::{accounts::provider::Provider, accounts::wallet::WalletUnlocked, types::ContractId};
 use log::{error, info};
-use spark_market_sdk::MarketContract;
+use spark_market_sdk::SparkMarketContract;
 use sqlx::PgPool;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
@@ -17,7 +17,7 @@ use tokio::time::Instant;
 
 pub struct SparkMatcher {
     pub order_manager: Arc<OrderManager>,
-    pub market: MarketContract,
+    pub market: SparkMarketContract,
     pub log_sender: mpsc::UnboundedSender<TransactionLog>,
     pub last_receive_time: Arc<tokio::sync::Mutex<Instant>>,
 }
@@ -29,7 +29,7 @@ impl SparkMatcher {
         let contract_id = ev("CONTRACT_ID")?;
         let wallet =
             WalletUnlocked::new_from_mnemonic_phrase(&mnemonic, Some(provider.clone())).unwrap();
-        let market = MarketContract::new(ContractId::from_str(&contract_id)?, wallet).await;
+        let market = SparkMarketContract::new(ContractId::from_str(&contract_id)?, wallet).await;
 
         let database_url = ev("DATABASE_URL")?;
         let db_pool = PgPool::connect(&database_url).await.unwrap();
@@ -132,23 +132,6 @@ impl SparkMatcher {
             .iter()
             .map(|id| Bits256::from_hex_str(id).unwrap())
             .collect();
-        /*
-                    let formatted_log = self.format_order_info(
-                        &matches.iter().map(|(buy_id, _, amount)| (buy_id.clone(), format!("Price: TBD"), *amount)).collect::<Vec<_>>(),
-                        &matches.iter().map(|(_, sell_id, amount)| (sell_id.clone(), format!("Price: TBD"), *amount)).collect::<Vec<_>>()
-                    );
-                    info!("Matched Orders:\n{}", formatted_log);
-
-                    let matches_human: Vec<String> = matches.clone()
-                        .into_iter()
-                        .flat_map(|(buy_id, sell_id, _)| vec![buy_id, sell_id])
-                        .collect();
-
-                    let matches: Vec<Bits256> = matches
-                        .into_iter()
-                        .flat_map(|(buy_id, sell_id, _)| vec![Bits256::from_hex_str(&buy_id).unwrap(), Bits256::from_hex_str(&sell_id).unwrap()])
-                        .collect();
-        */
         println!("=================================================");
         println!("=================================================");
         println!("matches {:?}", matches);
@@ -156,22 +139,6 @@ impl SparkMatcher {
         println!("=================================================");
         let res = self.market.match_order_many(unique_bits256_ids).await;
         self.order_manager.clear_orders().await;
-        /*
-        let a = Bits256::from_hex_str("0x7e9927af85019fa02bc244477f72cb132a7a8b8ea6becf0e30f8a042de2f5397").unwrap();
-        let b = Bits256::from_hex_str("0x48b64d43c40f3a70617475d345bfd709c233e43e3c78e44be42efb77a849f8bd").unwrap();
-
-        println!("=======================================");
-        println!("=======================================");
-        println!("=======================================");
-        let r = self.market.order(b).await.unwrap().value;
-        println!("{:?}", r);
-        let r1 = self.market.order_change_info(b).await.unwrap().value;
-        println!("=======================================");
-        //let r = self.market.order(b).await;
-        println!("{:?}", r1);
-        println!("=======================================");
-        println!("=======================================");
-        */
 
         match res {
             Ok(r) => {
